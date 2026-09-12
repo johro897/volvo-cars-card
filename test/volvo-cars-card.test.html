@@ -181,6 +181,15 @@ const optionLabels = Array.from(select.options).map((o) => o.textContent);
 assert("dropdown lists Volvo devices (XC60, V60)", optionLabels.includes("XC60") && optionLabels.includes("V60"));
 assert("dropdown excludes non-Volvo devices", !optionLabels.includes("Some Router"));
 
+// A live HA instance reassigns `hass` continuously as any entity's state
+// changes anywhere — the editor must not tear down its DOM (closing an
+// open dropdown, losing input focus) unless something it actually shows
+// (devices, language) changed.
+const selectBefore = editor.shadowRoot.querySelector(".ed-select");
+editor.hass = { ...hass }; // same devices/language, new top-level reference — simulates a routine hass tick
+const selectAfter = editor.shadowRoot.querySelector(".ed-select");
+assert("a routine hass update (unchanged devices/language) does not re-render the editor (regression: this used to close any open dropdown mid-selection)", selectBefore === selectAfter);
+
 const showStatsCheckbox = editor.shadowRoot.querySelector('[data-field="show_stats"]');
 assert("show_stats checkbox exists", !!showStatsCheckbox);
 showStatsCheckbox.checked = false;

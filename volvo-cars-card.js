@@ -797,8 +797,19 @@
     }
 
     set hass(hass) {
+      // A live HA instance reassigns `hass` continuously (any entity's state
+      // changing anywhere triggers it) — re-rendering unconditionally on
+      // every tick was destroying and recreating the whole DOM mid-
+      // interaction, which force-closed an open <select> the instant a
+      // viewer tried to pick a device (a real bug caught live). Only
+      // rebuild when something the editor actually displays changed.
+      const prevHass = this._hass;
+      const dirty = !prevHass
+        || prevHass.devices !== hass.devices
+        || prevHass.language !== hass.language
+        || prevHass.locale !== hass.locale;
       this._hass = hass;
-      this._render();
+      if (dirty) this._render();
     }
 
     _fireConfigChanged() {
