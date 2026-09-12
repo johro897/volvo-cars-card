@@ -104,6 +104,15 @@ show_stats: true
 
 ## Changelog
 
+### 0.5.1 (2026-09-12)
+
+Found by the owner testing `0.5.0` against real vehicles for the first time:
+
+- The device picker in the visual editor never appeared at all — replaced with a self-built dropdown (`hass.devices`, filtered to Volvo devices) instead of relying on `ha-device-picker`, which doesn't reliably load in every Home Assistant frontend session
+- "+ Add vehicle" updated the editor's own view but never saved the change, so the card kept reporting a configuration error even after adding a vehicle row
+- Also fixes two bugs caught in self-review before the report above: an invalid CSS value that made the quick-action buttons' tinted backgrounds invisible, and a checkbox/number field in the editor that silently ignored changes
+- Added a checked-in, dependency-free test suite (`test/volvo-cars-card.test.html`) covering both regressions and the core rendering/action behavior
+
 ### 0.5.0 (2026-09-12)
 
 Initial early release — feedback and tweaks expected before a `1.0.0`.
