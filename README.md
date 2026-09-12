@@ -104,6 +104,10 @@ show_stats: true
 
 ## Changelog
 
+### 0.5.3 (2026-09-12)
+
+- Fixed the visual editor re-rendering its entire DOM on every `hass` update — in a live Home Assistant instance this happens continuously, so opening the device dropdown and trying to pick an option closed it instantly. The editor now only re-renders when the device list or language actually changes.
+
 ### 0.5.2 (2026-09-12)
 
 - Fixed the visual editor dropping `type` from the card config on every edit (e.g. clicking "+ Add vehicle"), which made Home Assistant's edit dialog report "No card type configured" even though the card itself was configured correctly
