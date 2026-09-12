@@ -13,7 +13,7 @@ Unlike many custom cards, this one requires no external dependencies — no char
 - **Auto-discovery** — pick each vehicle's HA device once; the card finds its battery/fuel, range, lock, door/window, charging, location and consumption entities on its own
 - **Battery or fuel overview** — a range/charge ring for electric and plug-in hybrid vehicles, a plain range readout for combustion vehicles (no fake gauge when there's no real percentage to show)
 - **Doors & windows** — a top-down diagram highlighting only the open door/window/hood/tailgate, plus a plain-text summary
-- **Quick actions** — lock/unlock, climatization on/off, horn & lights, all calling the vehicle's real Home Assistant services
+- **Quick actions with confirm** — lock/unlock, climatization on/off, and horn/lights (offered separately as Horn, Lights, or Horn & lights) all call the vehicle's real Home Assistant services, but only after an extra confirm tap — the first tap just reveals the choice, nothing happens until you tap again
 - **Charging status** (electric/plug-in hybrid only) — status, power, time left, target level; the whole section is simply absent for a combustion-only vehicle, not just hidden
 - **Location** — an "open in map" link from the vehicle's device tracker
 - **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window)
@@ -104,6 +104,11 @@ show_stats: true
 ---
 
 ## Changelog
+
+### 0.5.5 (2026-09-12)
+
+- Every action (lock, climate, horn/lights) now requires an extra confirm tap instead of firing immediately — the icon arms a confirm chip, and only tapping that chip actually calls the service
+- Horn/lights now offers three separate choices (Horn, Lights, Horn & lights) using the integration's separate button entities, instead of always firing both together
 
 ### 0.5.4 (2026-09-12)
 
