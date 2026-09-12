@@ -19,6 +19,14 @@
       charging_power: "Power",
       charging_time_left: "Time left",
       charging_target: "Target",
+      charging_connection: "Connection",
+      charging_type: "Type",
+      charging_current_limit: "Current limit",
+      trip_data: "Trip data",
+      trip_manual: "Trip A",
+      trip_speed_manual: "Trip A avg. speed",
+      trip_automatic: "Trip B",
+      trip_speed_automatic: "Trip B avg. speed",
       home: "Home",
       stats_avg: "Avg · {days}d",
       no_history: "No history yet",
@@ -76,6 +84,7 @@
       editor_device: "Device",
       editor_name: "Name (optional)",
       editor_icon: "Icon (optional)",
+      editor_picture: "Photo URL (optional)",
       editor_show_stats: "Show statistics",
       editor_stats_hours: "Statistics window (hours)",
       editor_select_device: "Select a device…",
@@ -98,6 +107,14 @@
       charging_power: "Effekt",
       charging_time_left: "Tid kvar",
       charging_target: "Mål",
+      charging_connection: "Anslutning",
+      charging_type: "Typ",
+      charging_current_limit: "Strömgräns",
+      trip_data: "Tripp-data",
+      trip_manual: "Tripp A",
+      trip_speed_manual: "Tripp A snitthastighet",
+      trip_automatic: "Tripp B",
+      trip_speed_automatic: "Tripp B snitthastighet",
       home: "Hemma",
       stats_avg: "Snitt · {days}d",
       no_history: "Ingen historik ännu",
@@ -155,6 +172,7 @@
       editor_device: "Enhet",
       editor_name: "Namn (valfritt)",
       editor_icon: "Ikon (valfritt)",
+      editor_picture: "Bild-URL (valfritt)",
       editor_show_stats: "Visa statistik",
       editor_stats_hours: "Statistikfönster (timmar)",
       editor_select_device: "Välj en enhet…",
@@ -207,10 +225,18 @@
     "charging_power",
     "estimated_charging_time",
     "target_battery_charge_level",
+    "charger_connection_status",
+    "charging_type",
+    "charging_current_limit",
     "distance_to_service",
     "time_to_service",
     "engine_time_to_service",
     "service_warning",
+    "trip_meter_automatic",
+    "trip_meter_manual",
+    "average_speed",
+    "average_speed_automatic",
+    "battery_capacity",
   ];
   const DOOR_WINDOW_KEYS = [
     "door_front_left", "door_front_right", "door_rear_left", "door_rear_right",
@@ -285,7 +311,7 @@
       this._pulses = new Map(); // deviceId -> boolean (honk pulse)
       this._armed = new Map(); // deviceId -> "lock" | "climate" | "honk" | "engine" | undefined
       this._armTimers = new Map(); // deviceId -> setTimeout id, auto-dismisses an armed action
-      this._expanded = new Map(); // deviceId -> boolean (service & health section)
+      this._expanded = new Map(); // "deviceId:section" -> boolean (service/trip expandable sections)
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
     }
 
@@ -314,6 +340,7 @@
           device_id: v.device_id,
           name: v.name || "",
           icon: v.icon || "",
+          picture: v.picture || "",
         })),
       };
       if (this._hass) this._render();
@@ -413,8 +440,9 @@
         this._confirmEngine(deviceId);
       } else if (action === "honk-horn" || action === "honk-lights" || action === "honk-both") {
         this._confirmHonk(deviceId, action);
-      } else if (action === "toggle-service") {
-        this._expanded.set(deviceId, !this._expanded.get(deviceId));
+      } else if (action === "toggle-section") {
+        const key = `${deviceId}:${el.dataset.section}`;
+        this._expanded.set(key, !this._expanded.get(key));
         this._render();
       }
     }
@@ -568,6 +596,14 @@
         const rangeText = rangeBattery && rangeBattery.state !== "unknown" && rangeBattery.state !== "unavailable"
           ? `${Math.round(parseFloat(rangeBattery.state))} km`
           : "—";
+        const targetState = state(d.sensors.target_battery_charge_level);
+        const targetKnown = !!targetState && targetState.state !== "unknown" && targetState.state !== "unavailable";
+        const targetPct = targetKnown ? Math.max(0, Math.min(100, parseFloat(targetState.state))) : null;
+        const targetMarker = targetPct !== null
+          ? `<line x1="66" y1="${(66 - RING_RADIUS - 6).toFixed(1)}" x2="66" y2="${(66 - RING_RADIUS + 6).toFixed(1)}"
+               stroke="var(--primary-text-color)" stroke-width="2.5" stroke-linecap="round"
+               transform="rotate(${(targetPct / 100 * 360).toFixed(1)} 66 66)"/>`
+          : "";
         heroValueHtml = `
           <div class="vc-ring-wrap">
             <svg width="136" height="136" viewBox="0 0 132 132">
@@ -582,6 +618,7 @@
                 stroke-width="9" stroke-linecap="round"
                 stroke-dasharray="${RING_CIRCUMFERENCE.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
                 transform="rotate(-90 66 66)"/>
+              ${targetMarker}
             </svg>
             <div class="vc-ring-text">
               <span class="vc-ring-big">${batteryKnown ? Math.round(pct) + "%" : "—"}</span>
@@ -677,17 +714,22 @@
       const doorsHtml = this._renderDoors(d, hass, vehicle.device_id);
       const chargingHtml = this._renderCharging(d, hass);
       const serviceHtml = this._renderServiceHealth(d, hass, vehicle.device_id);
+      const tripHtml = this._renderTripData(d, hass, vehicle.device_id);
       const positionHtml = this._renderPosition(d, hass);
       const statsHtml = this._config.show_stats ? this._renderStats(vehicle, d, hass, isEv) : "";
       const distanceTrendHtml = this._config.show_stats ? this._renderDistanceTrend(vehicle, d, hass) : "";
       const iconHtml = vehicle.icon
         ? `<ha-icon icon="${escHtml(vehicle.icon)}" style="color:var(--primary-text-color); --mdc-icon-size:18px;"></ha-icon>`
         : "";
+      const pictureHtml = vehicle.picture
+        ? `<img class="vc-picture" src="${escHtml(vehicle.picture)}" alt="${name}" />`
+        : "";
 
       return `
         <div class="vc-vehicle">
           <div class="vc-hero" style="--vc-glow:${glowVar};">
             <div class="vc-glow"></div>
+            ${pictureHtml}
             <div class="vc-hero-name">
               ${iconHtml}
               <span class="vc-vehicle-name">${name}</span>
@@ -699,6 +741,7 @@
           ${doorsHtml}
           ${chargingHtml}
           ${serviceHtml}
+          ${tripHtml}
           ${positionHtml}
           ${statsHtml}
           ${distanceTrendHtml}
@@ -763,7 +806,10 @@
       const power = state(d.sensors.charging_power);
       const timeLeft = state(d.sensors.estimated_charging_time);
       const target = state(d.sensors.target_battery_charge_level);
-      if (!status && !power && !timeLeft && !target) return "";
+      const connection = state(d.sensors.charger_connection_status);
+      const type = state(d.sensors.charging_type);
+      const currentLimit = state(d.sensors.charging_current_limit);
+      if (!status && !power && !timeLeft && !target && !connection && !type && !currentLimit) return "";
 
       const row = (label, st, unit) => {
         if (!st) return "";
@@ -779,6 +825,9 @@
             ${row(t(hass, "charging_power"), power, power?.attributes?.unit_of_measurement || "")}
             ${row(t(hass, "charging_time_left"), timeLeft, timeLeft?.attributes?.unit_of_measurement || "")}
             ${row(t(hass, "charging_target"), target, "%")}
+            ${row(t(hass, "charging_connection"), connection, "")}
+            ${row(t(hass, "charging_type"), type, "")}
+            ${row(t(hass, "charging_current_limit"), currentLimit, currentLimit?.attributes?.unit_of_measurement || "A")}
           </div>
         </div>`;
     }
@@ -799,7 +848,7 @@
       const serviceWarningActive = serviceWarning && !isUnknown(serviceWarning) && serviceWarning.state !== "no_warning";
       const problemCount = activeWarnings.length + (serviceWarningActive ? 1 : 0);
 
-      const expanded = !!this._expanded.get(deviceId);
+      const expanded = !!this._expanded.get(`${deviceId}:service`);
       const summaryText = problemCount > 0 ? t(hass, "service_issues", { count: problemCount }) : t(hass, "service_ok");
       const summaryColor = problemCount > 0 ? "var(--warning-color)" : "var(--success-color)";
 
@@ -836,10 +885,45 @@
 
       return `
         <div class="vc-section">
-          <button class="vc-expand-toggle" data-action="toggle-service" data-device="${escHtml(deviceId)}">
+          <button class="vc-expand-toggle" data-action="toggle-section" data-section="service" data-device="${escHtml(deviceId)}">
             <span class="vc-section-title">${escHtml(t(hass, "service_health"))}</span>
             <span class="vc-expand-summary" style="color:${summaryColor};">${escHtml(summaryText)}</span>
             <span class="vc-chevron" style="transform:rotate(${expanded ? 180 : 0}deg);">${this._iconChevron("var(--secondary-text-color)")}</span>
+          </button>
+          ${detailHtml}
+        </div>`;
+    }
+
+    _renderTripData(d, hass, deviceId) {
+      const state = (id) => (id ? hass.states[id] : undefined);
+      const tripManual = state(d.sensors.trip_meter_manual);
+      const tripAuto = state(d.sensors.trip_meter_automatic);
+      const speedManual = state(d.sensors.average_speed);
+      const speedAuto = state(d.sensors.average_speed_automatic);
+      if (!tripManual && !tripAuto && !speedManual && !speedAuto) return "";
+
+      const isUnknown = (st) => !st || st.state === "unknown" || st.state === "unavailable";
+      const expanded = !!this._expanded.get(`${deviceId}:trip`);
+
+      const row = (label, st, unit) => {
+        if (!st) return "";
+        const val = isUnknown(st) ? "—" : `${Math.round(parseFloat(st.state) * 10) / 10} ${unit}`;
+        return `<div class="vc-kv"><span class="vc-kv-label">${escHtml(label)}</span><span class="vc-kv-val">${escHtml(val)}</span></div>`;
+      };
+
+      const detailHtml = expanded ? `
+        <div class="vc-kv-grid" style="margin-top:8px;">
+          ${row(t(hass, "trip_manual"), tripManual, "km")}
+          ${row(t(hass, "trip_speed_manual"), speedManual, "km/h")}
+          ${row(t(hass, "trip_automatic"), tripAuto, "km")}
+          ${row(t(hass, "trip_speed_automatic"), speedAuto, "km/h")}
+        </div>` : "";
+
+      return `
+        <div class="vc-section">
+          <button class="vc-expand-toggle" data-action="toggle-section" data-section="trip" data-device="${escHtml(deviceId)}">
+            <span class="vc-section-title">${escHtml(t(hass, "trip_data"))}</span>
+            <span class="vc-chevron" style="margin-left:auto; transform:rotate(${expanded ? 180 : 0}deg);">${this._iconChevron("var(--secondary-text-color)")}</span>
           </button>
           ${detailHtml}
         </div>`;
@@ -1126,6 +1210,10 @@
           filter: blur(30px);
           pointer-events: none;
         }
+        .vc-picture {
+          position: relative; width: 100%; max-width: 220px; height: 84px;
+          object-fit: cover; border-radius: 12px; display: block;
+        }
         .vc-hero-name { position: relative; display: flex; align-items: center; gap: 8px; }
         .vc-vehicle-name { font-size: 15px; font-weight: 700; color: var(--primary-text-color); }
         .vc-type-pill {
@@ -1214,6 +1302,7 @@
           device_id: v.device_id || "",
           name: v.name || "",
           icon: v.icon || "",
+          picture: v.picture || "",
         })),
       };
       this._render();
@@ -1295,20 +1384,28 @@
       const hass = this._hass;
       const deviceOptions = this._deviceOptions();
       const rows = this._config.vehicles.map((v, idx) => `
-        <div class="ed-row">
-          <select class="ed-input ed-select" data-idx="${idx}" data-field="device_id">
-            <option value="" ${v.device_id ? "" : "selected"}>${escHtml(t(hass, "editor_select_device"))}</option>
-            ${deviceOptions.map((o) => `<option value="${escHtml(o.id)}" ${o.id === v.device_id ? "selected" : ""}>${escHtml(o.label)}</option>`).join("")}
-          </select>
-          <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "editor_name"))}" data-idx="${idx}" data-field="name" value="${escHtml(v.name)}" />
-          <input class="ed-input ed-icon" type="text" placeholder="${escHtml(t(hass, "editor_icon"))}" data-idx="${idx}" data-field="icon" value="${escHtml(v.icon)}" />
-          <button class="ed-remove" type="button" data-action="remove-vehicle" data-idx="${idx}" title="${escHtml(t(hass, "editor_remove"))}">✕</button>
+        <div class="ed-vehicle-block">
+          <div class="ed-row">
+            <select class="ed-input ed-select" data-idx="${idx}" data-field="device_id">
+              <option value="" ${v.device_id ? "" : "selected"}>${escHtml(t(hass, "editor_select_device"))}</option>
+              ${deviceOptions.map((o) => `<option value="${escHtml(o.id)}" ${o.id === v.device_id ? "selected" : ""}>${escHtml(o.label)}</option>`).join("")}
+            </select>
+            <button class="ed-remove" type="button" data-action="remove-vehicle" data-idx="${idx}" title="${escHtml(t(hass, "editor_remove"))}">✕</button>
+          </div>
+          <div class="ed-row">
+            <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "editor_name"))}" data-idx="${idx}" data-field="name" value="${escHtml(v.name)}" />
+            <input class="ed-input ed-icon" type="text" placeholder="${escHtml(t(hass, "editor_icon"))}" data-idx="${idx}" data-field="icon" value="${escHtml(v.icon)}" />
+          </div>
+          <div class="ed-row">
+            <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "editor_picture"))}" data-idx="${idx}" data-field="picture" value="${escHtml(v.picture)}" />
+          </div>
         </div>`).join("");
 
       this.shadowRoot.innerHTML = `
         <style>
           .ed-wrap { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
           .ed-label { font-size: 12px; font-weight: 600; color: var(--secondary-text-color); }
+          .ed-vehicle-block { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--divider-color); border-radius: 8px; }
           .ed-row { display: flex; gap: 6px; align-items: center; }
           .ed-input { flex: 1 1 auto; min-width: 0; padding: 8px; border: 1px solid var(--divider-color); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); }
           .ed-select { flex: 1.4 1 auto; }

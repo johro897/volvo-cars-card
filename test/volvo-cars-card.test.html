@@ -63,6 +63,11 @@ const entities = {
   "sensor.xc60_charging_time": { device_id: "dev_xc60", translation_key: "estimated_charging_time" },
   "sensor.xc60_charging_target": { device_id: "dev_xc60", translation_key: "target_battery_charge_level" },
   "sensor.xc60_odometer": { device_id: "dev_xc60", translation_key: "odometer" },
+  "sensor.xc60_charging_connection": { device_id: "dev_xc60", translation_key: "charger_connection_status" },
+  "sensor.xc60_charging_type": { device_id: "dev_xc60", translation_key: "charging_type" },
+  "sensor.xc60_charging_current_limit": { device_id: "dev_xc60", translation_key: "charging_current_limit" },
+  "sensor.xc60_trip_manual": { device_id: "dev_xc60", translation_key: "trip_meter_manual" },
+  "sensor.xc60_trip_speed_manual": { device_id: "dev_xc60", translation_key: "average_speed" },
   "binary_sensor.xc60_tire_fl": { device_id: "dev_xc60", translation_key: "tire_front_left" },
   "lock.xc60_lock": { device_id: "dev_xc60" },
   "device_tracker.xc60_location": { device_id: "dev_xc60" },
@@ -98,6 +103,11 @@ const states = {
   "sensor.xc60_charging_time": state("sensor.xc60_charging_time", "100", { unit_of_measurement: "min" }),
   "sensor.xc60_charging_target": state("sensor.xc60_charging_target", "90"),
   "sensor.xc60_odometer": state("sensor.xc60_odometer", "18420", { unit_of_measurement: "km" }),
+  "sensor.xc60_charging_connection": state("sensor.xc60_charging_connection", "CONNECTED"),
+  "sensor.xc60_charging_type": state("sensor.xc60_charging_type", "AC"),
+  "sensor.xc60_charging_current_limit": state("sensor.xc60_charging_current_limit", "16", { unit_of_measurement: "A" }),
+  "sensor.xc60_trip_manual": state("sensor.xc60_trip_manual", "142.5", { unit_of_measurement: "km" }),
+  "sensor.xc60_trip_speed_manual": state("sensor.xc60_trip_speed_manual", "38.2", { unit_of_measurement: "km/h" }),
   "binary_sensor.xc60_tire_fl": state("binary_sensor.xc60_tire_fl", "on"),
   "lock.xc60_lock": state("lock.xc60_lock", "locked"),
   "device_tracker.xc60_location": state("device_tracker.xc60_location", "home", { latitude: 59.33, longitude: 18.06 }),
@@ -148,7 +158,7 @@ const card = document.createElement("volvo-cars-card");
 stage.appendChild(card);
 card.setConfig({
   vehicles: [
-    { device_id: "dev_xc60", name: "XC60", icon: "mdi:car-electric" },
+    { device_id: "dev_xc60", name: "XC60", icon: "mdi:car-electric", picture: "/local/xc60.jpg" },
     { device_id: "dev_v60", name: "V60" },
   ],
   show_stats: true,
@@ -165,21 +175,47 @@ assert("V60 has NO charging section at all (no charging sensors found)", !vehicl
 assert("V60 shows fuel range, not a percentage ring", vehicles[1].innerHTML.includes("560 km") && vehicles[1].innerHTML.includes("42 L"));
 assert("XC60 position link resolves to 'Home'", vehicles[0].innerHTML.includes("Home"));
 assert("configured vehicle icon is rendered (regression: the icon field used to be accepted but never shown)", vehicles[0].innerHTML.includes('ha-icon icon="mdi:car-electric"'));
+assert("configured vehicle picture is rendered", vehicles[0].querySelector('img.vc-picture[src="/local/xc60.jpg"]') !== null);
+assert("V60 (no picture configured) has no vc-picture element", !vehicles[1].querySelector("img.vc-picture"));
+
+// --- Richer charging fields + target-level ring marker ---
+assert("charging section shows connection status", vehicles[0].innerHTML.includes("CONNECTED"));
+assert("charging section shows charging type", vehicles[0].innerHTML.includes(">AC<"));
+assert("charging section shows current limit", vehicles[0].innerHTML.includes("16 A"));
+assert("battery ring draws a target-level marker line", !!vehicles[0].querySelector(".vc-ring-wrap line"));
+
+// --- Trip data section (collapsed by default, expands on tap) ---
+const tripToggle = Array.from(vehicles[0].querySelectorAll('[data-action="toggle-section"]'))
+  .find((el) => el.dataset.section === "trip");
+assert("XC60 has a Trip data section (trip meter + average speed present)", !!tripToggle);
+assert("trip detail is not shown while collapsed", !vehicles[0].innerHTML.includes("142.5"));
+tripToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+// That click replaced the whole shadow DOM, so every subsequent lookup
+// re-queries fresh from here on rather than reusing the original (now
+// detached) `vehicles` reference — a detached node can still be read
+// safely (its static content is unaffected), but clicking one is a no-op
+// since it's no longer wired to the live shadowRoot's event listener.
+let vXc60Trip = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+let vV60Trip = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+assert("expanding trip data reveals the trip distance", vXc60Trip.innerHTML.includes("142.5"));
+assert("expanding trip data reveals the average speed", vXc60Trip.innerHTML.includes("38.2"));
+assert("V60 has NO trip data section (no trip_meter/average_speed sensors)", !Array.from(vV60Trip.querySelectorAll('[data-action="toggle-section"]')).some((el) => el.dataset.section === "trip"));
 
 // --- Stats fallback test: only a non-base energy/fuel variant exists ---
 // This reproduces the owner's real report: their EV's average_energy_consumption
 // (base) sensor doesn't exist, only one of the other two variants does.
-assert("XC60 stats section renders using the '_charge' energy variant (not the missing base key)", vehicles[0].innerHTML.includes("18.4"));
-assert("V60 stats section renders using the '_automatic' fuel variant (not the missing base key)", vehicles[1].innerHTML.includes("6.2"));
+assert("XC60 stats section renders using the '_charge' energy variant (not the missing base key)", vXc60Trip.innerHTML.includes("18.4"));
+assert("V60 stats section renders using the '_automatic' fuel variant (not the missing base key)", vV60Trip.innerHTML.includes("6.2"));
 
 // --- Extended door diagram: tank_lid (new zone) shows up in the open list ---
-assert("V60's open tank_lid appears in the doors list (extended diagram zone)", vehicles[1].innerHTML.includes("Fuel/charge flap"));
+assert("V60's open tank_lid appears in the doors list (extended diagram zone)", vV60Trip.innerHTML.includes("Fuel/charge flap"));
 
 // --- Service & health section ---
-const xc60Toggle = vehicles[0].querySelector('[data-action="toggle-service"]');
+const findToggle = (root, section) => Array.from(root.querySelectorAll('[data-action="toggle-section"]')).find((el) => el.dataset.section === section);
+const xc60Toggle = findToggle(vXc60Trip, "service");
 assert("XC60 has a Service & health section (odometer + an active tire warning present)", !!xc60Toggle);
 assert("collapsed summary shows an issue count (one active tire warning)", xc60Toggle.innerHTML.includes("1 issue"));
-assert("detail rows are NOT shown while collapsed", !vehicles[0].querySelector(".vc-warning-row"));
+assert("detail rows are NOT shown while collapsed", !vXc60Trip.querySelector(".vc-warning-row"));
 xc60Toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 let vXc60Service = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
 assert("expanding reveals the odometer reading", vXc60Service.innerHTML.includes("18420"));
@@ -188,7 +224,7 @@ assert("expanding reveals the active tire warning", vXc60Service.innerHTML.inclu
 // The xc60Toggle click above replaced the whole shadow DOM, so re-query
 // V60 fresh too rather than reusing the (now detached) original reference.
 let vV60Service = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
-const v60Toggle = vV60Service.querySelector('[data-action="toggle-service"]');
+const v60Toggle = findToggle(vV60Service, "service");
 assert("V60 has a Service & health section (distance/time to service present)", !!v60Toggle);
 assert("V60's collapsed summary shows 'All good' (no active warnings)", v60Toggle.innerHTML.includes("All good"));
 
@@ -288,14 +324,14 @@ editor.addEventListener("config-changed", (e) => { lastConfig = e.detail.config;
 editor.setConfig({ type: "custom:volvo-cars-card", vehicles: [], show_stats: true, stats_history_hours: 168 });
 editor.hass = hass;
 
-assert("editor starts with zero vehicle rows", editor.shadowRoot.querySelectorAll(".ed-row").length === 0);
+assert("editor starts with zero vehicle blocks", editor.shadowRoot.querySelectorAll(".ed-vehicle-block").length === 0);
 
 const addBtn = editor.shadowRoot.querySelector('[data-action="add-vehicle"]');
 assert("add-vehicle button exists", !!addBtn);
 addBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
 assert("clicking 'add vehicle' fires config-changed (regression: this used to silently no-op)", lastConfig !== null && lastConfig.vehicles.length === 1);
-assert("editor now shows one row", editor.shadowRoot.querySelectorAll(".ed-row").length === 1);
+assert("editor now shows one vehicle block", editor.shadowRoot.querySelectorAll(".ed-vehicle-block").length === 1);
 assert("config-changed preserves 'type' (regression: setConfig used to drop it, breaking the edit dialog with 'No card type configured')", lastConfig.type === "custom:volvo-cars-card");
 
 const select = editor.shadowRoot.querySelector(".ed-select");
