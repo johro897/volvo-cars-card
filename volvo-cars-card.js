@@ -49,6 +49,10 @@
       editor_show_stats: "Show statistics",
       editor_stats_hours: "Statistics window (hours)",
       editor_select_device: "Select a device…",
+      editor_layout: "Layout",
+      layout_auto: "Auto (wrap when narrow)",
+      layout_horizontal: "Horizontal (side by side)",
+      layout_vertical: "Vertical (stacked)",
       waiting: "Waiting for data…",
     },
     sv: {
@@ -94,6 +98,10 @@
       editor_show_stats: "Visa statistik",
       editor_stats_hours: "Statistikfönster (timmar)",
       editor_select_device: "Välj en enhet…",
+      editor_layout: "Layout",
+      layout_auto: "Auto (radbryt vid smalt utrymme)",
+      layout_horizontal: "Horisontell (sida vid sida)",
+      layout_vertical: "Vertikal (staplat)",
       waiting: "Väntar på data…",
     },
   };
@@ -159,6 +167,7 @@
   const HISTORY_BUCKETS = 40;
   const DEFAULT_STATS_HOURS = 168;
   const MAX_STATS_HOURS = 24 * 30;
+  const LAYOUT_VALUES = ["auto", "horizontal", "vertical"];
 
   function localISO(date) {
     const p = (n) => String(n).padStart(2, "0");
@@ -172,7 +181,7 @@
     }
 
     static getStubConfig() {
-      return { vehicles: [], show_stats: true };
+      return { vehicles: [], show_stats: true, layout: "auto" };
     }
 
     constructor() {
@@ -205,6 +214,7 @@
           MAX_STATS_HOURS,
           Math.max(1, parseInt(config.stats_history_hours, 10) || DEFAULT_STATS_HOURS)
         ),
+        layout: LAYOUT_VALUES.includes(config.layout) ? config.layout : "auto",
         vehicles: config.vehicles.map((v) => ({
           device_id: v.device_id,
           name: v.name || "",
@@ -216,6 +226,13 @@
 
     getCardSize() {
       return 1 + (this._config?.vehicles?.length || 1) * 4;
+    }
+
+    _gridColumns() {
+      const count = Math.max(1, this._config?.vehicles?.length || 1);
+      if (this._config?.layout === "horizontal") return `repeat(${count}, minmax(0, 1fr))`;
+      if (this._config?.layout === "vertical") return "1fr";
+      return "repeat(auto-fit, minmax(280px, 1fr))";
     }
 
     set hass(hass) {
@@ -340,13 +357,14 @@
       const vehiclesHtml = this._config.vehicles
         .map((v) => this._renderVehicle(v, hass))
         .join("");
+      const gridColumns = this._gridColumns();
       this.shadowRoot.innerHTML = `
         <style>${this._css()}</style>
         <div class="vc-card">
           <div class="vc-header">
             <span class="vc-title">${escHtml(t(hass, "title"))}</span>
           </div>
-          <div class="vc-grid">${vehiclesHtml}</div>
+          <div class="vc-grid" style="grid-template-columns:${gridColumns};">${vehiclesHtml}</div>
         </div>
       `;
       if (this._config.show_stats) {
@@ -787,6 +805,7 @@
         ...config,
         show_stats: config?.show_stats !== false,
         stats_history_hours: config?.stats_history_hours || DEFAULT_STATS_HOURS,
+        layout: LAYOUT_VALUES.includes(config?.layout) ? config.layout : "auto",
         vehicles: (config?.vehicles || []).map((v) => ({
           device_id: v.device_id || "",
           name: v.name || "",
@@ -844,6 +863,8 @@
         this._config.show_stats = el.checked;
       } else if (field === "stats_history_hours") {
         this._config.stats_history_hours = parseInt(el.value, 10) || DEFAULT_STATS_HOURS;
+      } else if (field === "layout") {
+        this._config.layout = LAYOUT_VALUES.includes(el.value) ? el.value : "auto";
       } else {
         const idx = Number(el.dataset.idx);
         if (Number.isNaN(idx) || !this._config.vehicles[idx]) return;
@@ -898,6 +919,7 @@
           }
           .ed-toggle-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
           .ed-hours { width: 90px; padding: 8px; border: 1px solid var(--divider-color); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); }
+          .ed-layout { width: 160px; }
         </style>
         <div class="ed-wrap">
           <span class="ed-label">${escHtml(t(hass, "editor_vehicles"))}</span>
@@ -910,6 +932,14 @@
           <div class="ed-toggle-row">
             <span class="ed-label">${escHtml(t(hass, "editor_stats_hours"))}</span>
             <input class="ed-hours" type="number" min="1" data-field="stats_history_hours" value="${this._config.stats_history_hours}" />
+          </div>
+          <div class="ed-toggle-row">
+            <span class="ed-label">${escHtml(t(hass, "editor_layout"))}</span>
+            <select class="ed-hours ed-layout" data-field="layout">
+              <option value="auto" ${this._config.layout === "auto" ? "selected" : ""}>${escHtml(t(hass, "layout_auto"))}</option>
+              <option value="horizontal" ${this._config.layout === "horizontal" ? "selected" : ""}>${escHtml(t(hass, "layout_horizontal"))}</option>
+              <option value="vertical" ${this._config.layout === "vertical" ? "selected" : ""}>${escHtml(t(hass, "layout_vertical"))}</option>
+            </select>
           </div>
         </div>`;
     }

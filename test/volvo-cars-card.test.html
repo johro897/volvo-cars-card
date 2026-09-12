@@ -143,6 +143,30 @@ assert("V60 has NO charging section at all (no charging sensors found)", !vehicl
 assert("V60 shows fuel range, not a percentage ring", vehicles[1].innerHTML.includes("560 km") && vehicles[1].innerHTML.includes("42 L"));
 assert("XC60 position link resolves to 'Home'", vehicles[0].innerHTML.includes("Home"));
 
+// --- Layout option test ---
+const gridEl = card.shadowRoot.querySelector(".vc-grid");
+assert("default layout ('auto') uses a responsive auto-fit grid", gridEl.style.gridTemplateColumns.includes("auto-fit"));
+
+const cardHorizontal = document.createElement("volvo-cars-card");
+stage.appendChild(cardHorizontal);
+cardHorizontal.setConfig({
+  vehicles: [{ device_id: "dev_xc60" }, { device_id: "dev_v60" }],
+  layout: "horizontal",
+});
+cardHorizontal.hass = hass;
+const gridH = cardHorizontal.shadowRoot.querySelector(".vc-grid");
+assert("layout: horizontal forces one column per vehicle, ignoring container width", gridH.style.gridTemplateColumns.startsWith("repeat(2,"));
+
+const cardVertical = document.createElement("volvo-cars-card");
+stage.appendChild(cardVertical);
+cardVertical.setConfig({
+  vehicles: [{ device_id: "dev_xc60" }, { device_id: "dev_v60" }],
+  layout: "vertical",
+});
+cardVertical.hass = hass;
+const gridV = cardVertical.shadowRoot.querySelector(".vc-grid");
+assert("layout: vertical forces a single stacked column", gridV.style.gridTemplateColumns === "1fr");
+
 // --- Lock button test ---
 const lockBtn = vehicles[0].querySelector('[data-action="toggle-lock"]');
 assert("lock button exists for XC60", !!lockBtn);
@@ -196,6 +220,12 @@ showStatsCheckbox.checked = false;
 showStatsCheckbox.dispatchEvent(new Event("change", { bubbles: true }));
 assert("toggling show_stats fires config-changed with the new value (regression: used to require data-idx and silently no-op)", lastConfig.show_stats === false);
 assert("'type' still survives after further edits", lastConfig.type === "custom:volvo-cars-card");
+
+const layoutSelect = editor.shadowRoot.querySelector('[data-field="layout"]');
+assert("layout select exists", !!layoutSelect);
+layoutSelect.value = "horizontal";
+layoutSelect.dispatchEvent(new Event("change", { bubbles: true }));
+assert("changing layout fires config-changed with the new value", lastConfig.layout === "horizontal");
 
 // --- Render summary ------------------------------------------------
 const list = document.getElementById("results");
