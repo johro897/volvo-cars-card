@@ -162,7 +162,7 @@ const editor = document.createElement("volvo-cars-card-editor");
 stage.appendChild(editor);
 let lastConfig = null;
 editor.addEventListener("config-changed", (e) => { lastConfig = e.detail.config; });
-editor.setConfig({ vehicles: [], show_stats: true, stats_history_hours: 168 });
+editor.setConfig({ type: "custom:volvo-cars-card", vehicles: [], show_stats: true, stats_history_hours: 168 });
 editor.hass = hass;
 
 assert("editor starts with zero vehicle rows", editor.shadowRoot.querySelectorAll(".ed-row").length === 0);
@@ -173,6 +173,7 @@ addBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 
 assert("clicking 'add vehicle' fires config-changed (regression: this used to silently no-op)", lastConfig !== null && lastConfig.vehicles.length === 1);
 assert("editor now shows one row", editor.shadowRoot.querySelectorAll(".ed-row").length === 1);
+assert("config-changed preserves 'type' (regression: setConfig used to drop it, breaking the edit dialog with 'No card type configured')", lastConfig.type === "custom:volvo-cars-card");
 
 const select = editor.shadowRoot.querySelector(".ed-select");
 assert("device dropdown exists in the row", !!select);
@@ -185,6 +186,7 @@ assert("show_stats checkbox exists", !!showStatsCheckbox);
 showStatsCheckbox.checked = false;
 showStatsCheckbox.dispatchEvent(new Event("change", { bubbles: true }));
 assert("toggling show_stats fires config-changed with the new value (regression: used to require data-idx and silently no-op)", lastConfig.show_stats === false);
+assert("'type' still survives after further edits", lastConfig.type === "custom:volvo-cars-card");
 
 // --- Render summary ------------------------------------------------
 const list = document.getElementById("results");

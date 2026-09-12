@@ -779,7 +779,12 @@
     }
 
     setConfig(config) {
+      // Spread the incoming config FIRST so `type` (and anything else
+      // Lovelace attaches) survives round-tripping through config-changed —
+      // dropping it here breaks the edit-dialog preview with "No card type
+      // configured", a real bug caught live against the owner's HA instance.
       this._config = {
+        ...config,
         show_stats: config?.show_stats !== false,
         stats_history_hours: config?.stats_history_hours || DEFAULT_STATS_HOURS,
         vehicles: (config?.vehicles || []).map((v) => ({
