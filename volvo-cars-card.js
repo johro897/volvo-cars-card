@@ -146,6 +146,11 @@
   const DOOR_WINDOW_KEY_SET = new Set(DOOR_WINDOW_KEYS);
   const BUTTON_KEY_SET = new Set(BUTTON_KEYS);
 
+  const TINT_SUCCESS = "rgba(76,175,80,0.18)";
+  const TINT_ERROR = "rgba(239,83,80,0.18)";
+  const TINT_INFO = "rgba(3,169,244,0.18)";
+  const TINT_WARNING = "rgba(255,152,0,0.22)";
+
   const RING_RADIUS = 54;
   const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
   const HISTORY_MIN_REFRESH_MS = 5 * 60 * 1000;
@@ -358,13 +363,14 @@
       const rangeBattery = state(d.sensors.distance_to_empty_battery);
       const fuel = state(d.sensors.fuel_amount);
       const rangeTank = state(d.sensors.distance_to_empty_tank);
-      const isEv = battery && battery.state !== "unknown" && battery.state !== "unavailable";
+      const isEv = !!d.sensors.battery_charge_level;
+      const batteryKnown = !!battery && battery.state !== "unknown" && battery.state !== "unavailable";
 
       let heroValueHtml;
       let glowVar = "var(--warning-color)";
       if (isEv) {
         glowVar = "var(--success-color)";
-        const pct = Math.max(0, Math.min(100, parseFloat(battery.state) || 0));
+        const pct = batteryKnown ? Math.max(0, Math.min(100, parseFloat(battery.state) || 0)) : 0;
         const offset = RING_CIRCUMFERENCE * (1 - pct / 100);
         const rangeText = rangeBattery && rangeBattery.state !== "unknown" && rangeBattery.state !== "unavailable"
           ? `${Math.round(parseFloat(rangeBattery.state))} km`
@@ -385,7 +391,7 @@
                 transform="rotate(-90 66 66)"/>
             </svg>
             <div class="vc-ring-text">
-              <span class="vc-ring-big">${Math.round(pct)}%</span>
+              <span class="vc-ring-big">${batteryKnown ? Math.round(pct) + "%" : "—"}</span>
               <span class="vc-ring-small">${rangeText}</span>
             </div>
           </div>`;
@@ -418,19 +424,19 @@
           ${d.lock ? `
             <button class="vc-action-btn" data-action="toggle-lock" data-device="${escHtml(vehicle.device_id)}"
               title="${escHtml(t(hass, "lock_action"))}"
-              style="background:${isLocked ? "var(--success-color)" : "var(--error-color)"}22;">
+              style="background:${lockKnown ? (isLocked ? TINT_SUCCESS : TINT_ERROR) : "var(--secondary-background-color)"};">
               ${isLocked ? this._iconLockClosed(lockColorVar) : this._iconLockOpen(lockColorVar)}
             </button>` : ""}
           ${climateAvailable ? `
             <button class="vc-action-btn" data-action="toggle-climate" data-device="${escHtml(vehicle.device_id)}"
               title="${escHtml(t(hass, "climate_action"))}"
-              style="background:${climateOn ? "var(--info-color, var(--primary-color))22" : "var(--secondary-background-color)"};">
+              style="background:${climateOn ? TINT_INFO : "var(--secondary-background-color)"};">
               ${this._iconClimate(climateOn ? "var(--info-color, var(--primary-color))" : "var(--secondary-text-color)")}
             </button>` : ""}
           ${honkAvailable ? `
             <button class="vc-action-btn" data-action="honk" data-device="${escHtml(vehicle.device_id)}"
               title="${escHtml(t(hass, "honk_action"))}"
-              style="background:${pulsing ? "var(--warning-color)22" : "var(--secondary-background-color)"};">
+              style="background:${pulsing ? TINT_WARNING : "var(--secondary-background-color)"};">
               ${this._iconHonk(pulsing ? "var(--warning-color)" : "var(--secondary-text-color)")}
             </button>` : ""}
         </div>
@@ -641,14 +647,11 @@
       let pi = 0;
       for (let b = 0; b < HISTORY_BUCKETS; b++) {
         const bucketEnd = startMs + ((b + 1) / HISTORY_BUCKETS) * span;
-        let sawAny = false;
         while (pi < points.length && points[pi].t <= bucketEnd) {
           carry = points[pi].v;
-          sawAny = true;
           pi++;
         }
         values[b] = carry;
-        if (sawAny) values[b] = carry;
       }
       return values;
     }
@@ -818,14 +821,15 @@
 
     _onFieldChange(e) {
       const el = e.target;
-      const idx = Number(el.dataset.idx);
       const field = el.dataset.field;
-      if (Number.isNaN(idx) || !field) return;
+      if (!field) return;
       if (field === "show_stats") {
         this._config.show_stats = el.checked;
       } else if (field === "stats_history_hours") {
         this._config.stats_history_hours = parseInt(el.value, 10) || DEFAULT_STATS_HOURS;
-      } else if (this._config.vehicles[idx]) {
+      } else {
+        const idx = Number(el.dataset.idx);
+        if (Number.isNaN(idx) || !this._config.vehicles[idx]) return;
         this._config.vehicles[idx][field] = el.value;
       }
       this._fireConfigChanged();
