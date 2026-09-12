@@ -253,6 +253,22 @@ const distances = card._bucketizeDailyDistance(syntheticOdometerHistory);
 assert("daily distance bucketing returns one entry per configured day", distances.length === 7);
 assert("today's distance reflects the most recent delta (1150 - 1120 = 30)", distances[distances.length - 1] === 30);
 
+// --- Title option test (regression: the header used to be a hardcoded,
+// untranslatable-by-config "Volvo Cars" with no way to customize or hide it) ---
+assert("default config shows the translated default title", card.shadowRoot.querySelector(".vc-title")?.textContent === "Volvo Cars");
+
+const cardCustomTitle = document.createElement("volvo-cars-card");
+stage.appendChild(cardCustomTitle);
+cardCustomTitle.setConfig({ vehicles: [{ device_id: "dev_xc60" }], title: "Our Cars" });
+cardCustomTitle.hass = hass;
+assert("a configured title overrides the default", cardCustomTitle.shadowRoot.querySelector(".vc-title")?.textContent === "Our Cars");
+
+const cardNoTitle = document.createElement("volvo-cars-card");
+stage.appendChild(cardNoTitle);
+cardNoTitle.setConfig({ vehicles: [{ device_id: "dev_xc60" }], title: "" });
+cardNoTitle.hass = hass;
+assert("an explicitly empty title hides the header row entirely", !cardNoTitle.shadowRoot.querySelector(".vc-header"));
+
 // --- Layout option test ---
 const gridEl = card.shadowRoot.querySelector(".vc-grid");
 assert("default layout ('auto') uses a responsive auto-fit grid", gridEl.style.gridTemplateColumns.includes("auto-fit"));
@@ -361,6 +377,12 @@ assert("layout select exists", !!layoutSelect);
 layoutSelect.value = "horizontal";
 layoutSelect.dispatchEvent(new Event("change", { bubbles: true }));
 assert("changing layout fires config-changed with the new value", lastConfig.layout === "horizontal");
+
+const titleInput = editor.shadowRoot.querySelector('[data-field="title"]');
+assert("title input exists in the editor", !!titleInput);
+titleInput.value = "Our Cars";
+titleInput.dispatchEvent(new Event("change", { bubbles: true }));
+assert("changing the title input fires config-changed with the new value", lastConfig.title === "Our Cars");
 
 // --- Render summary ------------------------------------------------
 const list = document.getElementById("results");

@@ -78,6 +78,7 @@
       vehicles_required: "'vehicles' is required and must include at least one vehicle",
       vehicles_duplicate: "Duplicate device: {device}",
       vehicle_missing_device: "Each vehicle needs a device_id",
+      editor_title: "Card title (optional)",
       editor_vehicles: "Vehicles",
       editor_add_vehicle: "+ Add vehicle",
       editor_remove: "Remove",
@@ -166,6 +167,7 @@
       vehicles_required: "'vehicles' krävs och måste innehålla minst ett fordon",
       vehicles_duplicate: "Dubblerad device: {device}",
       vehicle_missing_device: "Varje fordon behöver ett device_id",
+      editor_title: "Kortets titel (valfritt)",
       editor_vehicles: "Fordon",
       editor_add_vehicle: "+ Lägg till fordon",
       editor_remove: "Ta bort",
@@ -330,6 +332,9 @@
         seen.add(v.device_id);
       }
       this._config = {
+        // null = use the translated default ("Volvo Cars"); "" hides the
+        // header row entirely; anything else is shown verbatim.
+        title: typeof config.title === "string" ? config.title : null,
         show_stats: config.show_stats !== false,
         stats_history_hours: Math.min(
           MAX_STATS_HOURS,
@@ -558,12 +563,14 @@
         .map((v) => this._renderVehicle(v, hass))
         .join("");
       const gridColumns = this._gridColumns();
+      const titleText = this._config.title !== null ? this._config.title : t(hass, "title");
+      const headerHtml = titleText
+        ? `<div class="vc-header"><span class="vc-title">${escHtml(titleText)}</span></div>`
+        : "";
       this.shadowRoot.innerHTML = `
         <style>${this._css()}</style>
         <div class="vc-card">
-          <div class="vc-header">
-            <span class="vc-title">${escHtml(t(hass, "title"))}</span>
-          </div>
+          ${headerHtml}
           <div class="vc-grid" style="grid-template-columns:${gridColumns};">${vehiclesHtml}</div>
         </div>
       `;
@@ -1295,6 +1302,7 @@
       // configured", a real bug caught live against the owner's HA instance.
       this._config = {
         ...config,
+        title: typeof config?.title === "string" ? config.title : null,
         show_stats: config?.show_stats !== false,
         stats_history_hours: config?.stats_history_hours || DEFAULT_STATS_HOURS,
         layout: LAYOUT_VALUES.includes(config?.layout) ? config.layout : "auto",
@@ -1352,7 +1360,9 @@
       const el = e.target;
       const field = el.dataset.field;
       if (!field) return;
-      if (field === "show_stats") {
+      if (field === "title") {
+        this._config.title = el.value;
+      } else if (field === "show_stats") {
         this._config.show_stats = el.checked;
       } else if (field === "stats_history_hours") {
         this._config.stats_history_hours = parseInt(el.value, 10) || DEFAULT_STATS_HOURS;
@@ -1423,6 +1433,10 @@
           .ed-layout { width: 160px; }
         </style>
         <div class="ed-wrap">
+          <div class="ed-toggle-row" style="margin-top:0;">
+            <span class="ed-label">${escHtml(t(hass, "editor_title"))}</span>
+          </div>
+          <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "title"))}" data-field="title" value="${escHtml(this._config.title || "")}" />
           <span class="ed-label">${escHtml(t(hass, "editor_vehicles"))}</span>
           ${rows}
           <button class="ed-add" type="button" data-action="add-vehicle">${escHtml(t(hass, "editor_add_vehicle"))}</button>
