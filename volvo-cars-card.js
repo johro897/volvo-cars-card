@@ -32,6 +32,29 @@
       honk_horn: "Horn",
       honk_lights: "Lights",
       honk_both: "Horn & lights",
+      engine_action: "Engine",
+      confirm_engine_on: "Tap to start engine",
+      confirm_engine_off: "Tap to stop engine",
+      engine_on: "Engine running",
+      service_health: "Service & health",
+      service_ok: "All good",
+      service_issues: "{count} issue(s)",
+      no_warnings: "No active warnings",
+      odometer: "Odometer",
+      distance_to_service: "Distance to service",
+      time_to_service: "Time to service",
+      engine_time_to_service: "Engine hours to service",
+      days_unit: "days",
+      hours_unit: "hours",
+      distance_trend: "Distance driven · last {days}d",
+      brake_fluid_level_warning: "Brake fluid low",
+      coolant_level_warning: "Coolant level low",
+      oil_level_warning: "Oil level warning",
+      washer_fluid_level_warning: "Washer fluid low",
+      tire_front_left: "Front left tire pressure",
+      tire_front_right: "Front right tire pressure",
+      tire_rear_left: "Rear left tire pressure",
+      tire_rear_right: "Rear right tire pressure",
       door_front_left: "Front left door",
       door_front_right: "Front right door",
       door_rear_left: "Rear left door",
@@ -88,6 +111,29 @@
       honk_horn: "Signalhorn",
       honk_lights: "Blink",
       honk_both: "Signalhorn & blink",
+      engine_action: "Motor",
+      confirm_engine_on: "Tryck för att starta motorn",
+      confirm_engine_off: "Tryck för att stoppa motorn",
+      engine_on: "Motor igång",
+      service_health: "Service & hälsa",
+      service_ok: "Allt OK",
+      service_issues: "{count} anmärkning(ar)",
+      no_warnings: "Inga aktiva varningar",
+      odometer: "Mätarställning",
+      distance_to_service: "Till service",
+      time_to_service: "Tid till service",
+      engine_time_to_service: "Motortimmar till service",
+      days_unit: "dagar",
+      hours_unit: "timmar",
+      distance_trend: "Körd sträcka · senaste {days}d",
+      brake_fluid_level_warning: "Bromsvätska låg",
+      coolant_level_warning: "Kylarvätska låg",
+      oil_level_warning: "Oljenivåvarning",
+      washer_fluid_level_warning: "Spolarvätska låg",
+      tire_front_left: "Däcktryck fram vänster",
+      tire_front_right: "Däcktryck fram höger",
+      tire_rear_left: "Däcktryck bak vänster",
+      tire_rear_right: "Däcktryck bak höger",
       door_front_left: "Framdörr vänster",
       door_front_right: "Framdörr höger",
       door_rear_left: "Bakdörr vänster",
@@ -151,12 +197,20 @@
     "distance_to_empty_battery",
     "distance_to_empty_tank",
     "fuel_amount",
+    "odometer",
     "average_energy_consumption",
+    "average_energy_consumption_automatic",
+    "average_energy_consumption_charge",
     "average_fuel_consumption",
+    "average_fuel_consumption_automatic",
     "charging_status",
     "charging_power",
     "estimated_charging_time",
     "target_battery_charge_level",
+    "distance_to_service",
+    "time_to_service",
+    "engine_time_to_service",
+    "service_warning",
   ];
   const DOOR_WINDOW_KEYS = [
     "door_front_left", "door_front_right", "door_rear_left", "door_rear_right",
@@ -164,12 +218,34 @@
     "window_front_left", "window_front_right", "window_rear_left", "window_rear_right",
     "sunroof",
   ];
-  const BUTTON_KEYS = ["climatization_start", "climatization_stop", "honk", "flash", "honk_flash"];
+  // A curated subset of the integration's ~30 warning binary_sensors — fluids
+  // and tire pressure, not the dozen individual light-bulb-failure sensors
+  // (too granular for a compact card; easy to extend later if asked).
+  const HEALTH_KEYS = [
+    "brake_fluid_level_warning", "coolant_level_warning", "oil_level_warning", "washer_fluid_level_warning",
+    "tire_front_left", "tire_front_right", "tire_rear_left", "tire_rear_right",
+  ];
+  const BUTTON_KEYS = ["climatization_start", "climatization_stop", "honk", "flash", "honk_flash", "engine_start", "engine_stop"];
   const ARM_TIMEOUT_MS = 5000;
+  // Entities are only created at all if the vehicle's API data actually
+  // contains that field (verified in sensor.py's entity-creation loop) — so
+  // a given car may expose only one of these three energy-consumption
+  // variants (or one of the two fuel variants). Try each in order rather
+  // than hardcoding the first one.
+  const ENERGY_STAT_KEYS = ["average_energy_consumption", "average_energy_consumption_automatic", "average_energy_consumption_charge"];
+  const FUEL_STAT_KEYS = ["average_fuel_consumption", "average_fuel_consumption_automatic"];
+  const ODOMETER_DAYS = 7;
 
   const SENSOR_KEY_SET = new Set(SENSOR_KEYS);
   const DOOR_WINDOW_KEY_SET = new Set(DOOR_WINDOW_KEYS);
+  const HEALTH_KEY_SET = new Set(HEALTH_KEYS);
   const BUTTON_KEY_SET = new Set(BUTTON_KEYS);
+
+  function humanize(str) {
+    if (!str) return "";
+    const s = String(str).replace(/_/g, " ");
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
 
   const TINT_SUCCESS = "rgba(76,175,80,0.18)";
   const TINT_ERROR = "rgba(239,83,80,0.18)";
@@ -205,9 +281,11 @@
       this._hass = null;
       this._config = null;
       this._history = new Map(); // deviceId -> { values, fetchedAt, fetching }
+      this._odoHistory = new Map(); // deviceId -> { distances, fetchedAt, fetching }
       this._pulses = new Map(); // deviceId -> boolean (honk pulse)
-      this._armed = new Map(); // deviceId -> "lock" | "climate" | "honk" | undefined
+      this._armed = new Map(); // deviceId -> "lock" | "climate" | "honk" | "engine" | undefined
       this._armTimers = new Map(); // deviceId -> setTimeout id, auto-dismisses an armed action
+      this._expanded = new Map(); // deviceId -> boolean (service & health section)
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
     }
 
@@ -275,6 +353,7 @@
         const d = this._discoverVehicle(v.device_id, hass);
         Object.values(d.sensors).forEach((id) => ids.add(id));
         Object.values(d.doors).forEach((id) => ids.add(id));
+        Object.values(d.health).forEach((id) => ids.add(id));
         if (d.lock) ids.add(d.lock);
         if (d.tracker) ids.add(d.tracker);
       }
@@ -285,7 +364,7 @@
       hass = hass || this._hass;
       const entities = hass?.entities || {};
       const states = hass?.states || {};
-      const found = { sensors: {}, doors: {}, lock: null, tracker: null, buttons: {} };
+      const found = { sensors: {}, doors: {}, health: {}, lock: null, tracker: null, buttons: {} };
       for (const entityId in entities) {
         const entry = entities[entityId];
         if (!entry || entry.device_id !== deviceId) continue;
@@ -300,8 +379,9 @@
               found.sensors.battery_charge_level = entityId;
             }
           }
-        } else if (domain === "binary_sensor" && key && DOOR_WINDOW_KEY_SET.has(key)) {
-          found.doors[key] = entityId;
+        } else if (domain === "binary_sensor" && key) {
+          if (DOOR_WINDOW_KEY_SET.has(key)) found.doors[key] = entityId;
+          else if (HEALTH_KEY_SET.has(key)) found.health[key] = entityId;
         } else if (domain === "lock" && !found.lock) {
           found.lock = entityId;
         } else if (domain === "device_tracker" && !found.tracker) {
@@ -311,6 +391,11 @@
         }
       }
       return found;
+    }
+
+    _pickStatKey(d, isEv) {
+      const keys = isEv ? ENERGY_STAT_KEYS : FUEL_STAT_KEYS;
+      return keys.find((k) => d.sensors[k]) || null;
     }
 
     _onClick(e) {
@@ -324,8 +409,13 @@
         this._confirmLock(deviceId);
       } else if (action === "confirm-climate") {
         this._confirmClimate(deviceId);
+      } else if (action === "confirm-engine") {
+        this._confirmEngine(deviceId);
       } else if (action === "honk-horn" || action === "honk-lights" || action === "honk-both") {
         this._confirmHonk(deviceId, action);
+      } else if (action === "toggle-service") {
+        this._expanded.set(deviceId, !this._expanded.get(deviceId));
+        this._render();
       }
     }
 
@@ -395,6 +485,28 @@
       return this._climateLocal.get(deviceId) || false;
     }
 
+    // Engine start/stop (pre-heat/pre-cool via the combustion engine, fuel
+    // and PHEV vehicles only) has no confirmed status sensor either — same
+    // optimistic-local-state approach as climate.
+    _confirmEngine(deviceId) {
+      const d = this._discoverVehicle(deviceId);
+      this._disarm(deviceId);
+      const startId = d.buttons.engine_start;
+      const stopId = d.buttons.engine_stop;
+      if (!startId || !stopId || !this._hass) { this._render(); return; }
+      const wasOn = this._engineState(deviceId);
+      const target = wasOn ? stopId : startId;
+      this._hass.callService("button", "press", { entity_id: target }).catch(() => {});
+      this._engineLocal = this._engineLocal || new Map();
+      this._engineLocal.set(deviceId, !wasOn);
+      this._render();
+    }
+
+    _engineState(deviceId) {
+      this._engineLocal = this._engineLocal || new Map();
+      return this._engineLocal.get(deviceId) || false;
+    }
+
     _confirmHonk(deviceId, action) {
       const d = this._discoverVehicle(deviceId);
       this._disarm(deviceId);
@@ -430,6 +542,7 @@
       if (this._config.show_stats) {
         for (const v of this._config.vehicles) {
           this._maybeRefreshHistory(v.device_id);
+          this._maybeRefreshOdometerHistory(v.device_id);
         }
       }
     }
@@ -496,6 +609,8 @@
 
       const climateAvailable = !!(d.buttons.climatization_start && d.buttons.climatization_stop);
       const climateOn = this._climateState(vehicle.device_id);
+      const engineAvailable = !!(d.buttons.engine_start && d.buttons.engine_stop);
+      const engineOn = this._engineState(vehicle.device_id);
       const honkAvailable = !!(d.buttons.honk || d.buttons.flash || d.buttons.honk_flash);
       const pulsing = this._pulses.get(vehicle.device_id);
       const armed = this._armed.get(vehicle.device_id);
@@ -516,6 +631,12 @@
               style="background:${climateOn ? TINT_INFO : "var(--secondary-background-color)"};${armedRing("climate")}">
               ${this._iconClimate(climateOn ? "var(--info-color, var(--primary-color))" : "var(--secondary-text-color)")}
             </button>` : ""}
+          ${engineAvailable ? `
+            <button class="vc-action-btn" data-action="arm" data-arm="engine" data-device="${dev}"
+              title="${escHtml(t(hass, "engine_action"))}"
+              style="background:${engineOn ? TINT_INFO : "var(--secondary-background-color)"};${armedRing("engine")}">
+              ${this._iconEngine(engineOn ? "var(--info-color, var(--primary-color))" : "var(--secondary-text-color)")}
+            </button>` : ""}
           ${honkAvailable ? `
             <button class="vc-action-btn" data-action="arm" data-arm="honk" data-device="${dev}"
               title="${escHtml(t(hass, "honk_action"))}"
@@ -535,6 +656,12 @@
               ${escHtml(climateOn ? t(hass, "confirm_climate_off") : t(hass, "confirm_climate_on"))}
             </button>
           </div>` : ""}
+        ${armed === "engine" ? `
+          <div class="vc-confirm-row">
+            <button class="vc-confirm-chip" data-action="confirm-engine" data-device="${dev}">
+              ${escHtml(engineOn ? t(hass, "confirm_engine_off") : t(hass, "confirm_engine_on"))}
+            </button>
+          </div>` : ""}
         ${armed === "honk" ? `
           <div class="vc-confirm-row">
             ${d.buttons.honk ? `<button class="vc-confirm-chip" data-action="honk-horn" data-device="${dev}">${escHtml(t(hass, "honk_horn"))}</button>` : ""}
@@ -544,18 +671,25 @@
         <div class="vc-status-line">
           <span style="color:${lockColorVar};">${escHtml(lockLabel)}</span>
           ${climateAvailable && climateOn ? `<span class="vc-status-sep">·</span><span style="color:var(--info-color, var(--primary-color));">${escHtml(t(hass, "climate_on"))}</span>` : ""}
+          ${engineAvailable && engineOn ? `<span class="vc-status-sep">·</span><span style="color:var(--info-color, var(--primary-color));">${escHtml(t(hass, "engine_on"))}</span>` : ""}
         </div>`;
 
       const doorsHtml = this._renderDoors(d, hass, vehicle.device_id);
       const chargingHtml = this._renderCharging(d, hass);
+      const serviceHtml = this._renderServiceHealth(d, hass, vehicle.device_id);
       const positionHtml = this._renderPosition(d, hass);
       const statsHtml = this._config.show_stats ? this._renderStats(vehicle, d, hass, isEv) : "";
+      const distanceTrendHtml = this._config.show_stats ? this._renderDistanceTrend(vehicle, d, hass) : "";
+      const iconHtml = vehicle.icon
+        ? `<ha-icon icon="${escHtml(vehicle.icon)}" style="color:var(--primary-text-color); --mdc-icon-size:18px;"></ha-icon>`
+        : "";
 
       return `
         <div class="vc-vehicle">
           <div class="vc-hero" style="--vc-glow:${glowVar};">
             <div class="vc-glow"></div>
             <div class="vc-hero-name">
+              ${iconHtml}
               <span class="vc-vehicle-name">${name}</span>
               <span class="vc-type-pill">${isEv ? "EV" : (fuel ? "ICE" : "")}</span>
             </div>
@@ -564,8 +698,10 @@
           </div>
           ${doorsHtml}
           ${chargingHtml}
+          ${serviceHtml}
           ${positionHtml}
           ${statsHtml}
+          ${distanceTrendHtml}
         </div>`;
     }
 
@@ -593,7 +729,11 @@
           <rect x="90" y="58" width="20" height="42" rx="6" fill="${zoneColor("door_front_right")}"/>
           <rect x="90" y="58" width="20" height="11" rx="4" fill="${d.doors.window_front_right ? (isOpen("window_front_right") ? "var(--warning-color)" : "var(--secondary-background-color)") : zoneColor("door_front_right")}"/>
           <rect x="10" y="102" width="20" height="42" rx="6" fill="${zoneColor("door_rear_left")}"/>
+          <rect x="10" y="102" width="20" height="11" rx="4" fill="${d.doors.window_rear_left ? (isOpen("window_rear_left") ? "var(--warning-color)" : "var(--secondary-background-color)") : zoneColor("door_rear_left")}"/>
           <rect x="90" y="102" width="20" height="42" rx="6" fill="${zoneColor("door_rear_right")}"/>
+          <rect x="90" y="102" width="20" height="11" rx="4" fill="${d.doors.window_rear_right ? (isOpen("window_rear_right") ? "var(--warning-color)" : "var(--secondary-background-color)") : zoneColor("door_rear_right")}"/>
+          <rect x="44" y="41" width="32" height="13" rx="6" fill="${zoneColor("sunroof")}"/>
+          <rect x="96" y="151" width="14" height="14" rx="4" fill="${zoneColor("tank_lid")}"/>
         </svg>` : "";
 
       const listHtml = openItems.length
@@ -643,6 +783,97 @@
         </div>`;
     }
 
+    _renderServiceHealth(d, hass, deviceId) {
+      const state = (id) => (id ? hass.states[id] : undefined);
+      const odometer = state(d.sensors.odometer);
+      const distService = state(d.sensors.distance_to_service);
+      const timeService = state(d.sensors.time_to_service);
+      const engineTimeService = state(d.sensors.engine_time_to_service);
+      const serviceWarning = state(d.sensors.service_warning);
+      const hasServiceData = !!(odometer || distService || timeService || engineTimeService || serviceWarning);
+      const healthKeysFound = HEALTH_KEYS.filter((k) => d.health[k]);
+      if (!hasServiceData && healthKeysFound.length === 0) return "";
+
+      const isUnknown = (st) => !st || st.state === "unknown" || st.state === "unavailable";
+      const activeWarnings = healthKeysFound.filter((k) => state(d.health[k])?.state === "on");
+      const serviceWarningActive = serviceWarning && !isUnknown(serviceWarning) && serviceWarning.state !== "no_warning";
+      const problemCount = activeWarnings.length + (serviceWarningActive ? 1 : 0);
+
+      const expanded = !!this._expanded.get(deviceId);
+      const summaryText = problemCount > 0 ? t(hass, "service_issues", { count: problemCount }) : t(hass, "service_ok");
+      const summaryColor = problemCount > 0 ? "var(--warning-color)" : "var(--success-color)";
+
+      const row = (label, st, unit) => {
+        if (!st) return "";
+        const val = isUnknown(st) ? "—" : `${Math.round(parseFloat(st.state))} ${unit}`;
+        return `<div class="vc-kv"><span class="vc-kv-label">${escHtml(label)}</span><span class="vc-kv-val">${escHtml(val)}</span></div>`;
+      };
+
+      const warningRows = activeWarnings.map((k) => `
+        <div class="vc-warning-row">
+          <span class="vc-dot" style="background:var(--warning-color);"></span>
+          <span>${escHtml(t(hass, k))}</span>
+        </div>`).join("") + (serviceWarningActive ? `
+        <div class="vc-warning-row">
+          <span class="vc-dot" style="background:var(--warning-color);"></span>
+          <span>${escHtml(humanize(serviceWarning.state))}</span>
+        </div>` : "");
+
+      const detailHtml = expanded ? `
+        ${hasServiceData ? `
+          <div class="vc-kv-grid" style="margin-top:8px;">
+            ${row(t(hass, "odometer"), odometer, "km")}
+            ${row(t(hass, "distance_to_service"), distService, "km")}
+            ${row(t(hass, "time_to_service"), timeService, t(hass, "days_unit"))}
+            ${row(t(hass, "engine_time_to_service"), engineTimeService, t(hass, "hours_unit"))}
+          </div>` : ""}
+        ${problemCount > 0 ? warningRows : `
+          <div class="vc-warning-row">
+            <span class="vc-dot" style="background:var(--success-color);"></span>
+            <span>${escHtml(t(hass, "no_warnings"))}</span>
+          </div>`}
+      ` : "";
+
+      return `
+        <div class="vc-section">
+          <button class="vc-expand-toggle" data-action="toggle-service" data-device="${escHtml(deviceId)}">
+            <span class="vc-section-title">${escHtml(t(hass, "service_health"))}</span>
+            <span class="vc-expand-summary" style="color:${summaryColor};">${escHtml(summaryText)}</span>
+            <span class="vc-chevron" style="transform:rotate(${expanded ? 180 : 0}deg);">${this._iconChevron("var(--secondary-text-color)")}</span>
+          </button>
+          ${detailHtml}
+        </div>`;
+    }
+
+    _renderDistanceTrend(vehicle, d, hass) {
+      if (!d.sensors.odometer) return "";
+      const entry = this._odoHistory.get(vehicle.device_id);
+      const distances = entry?.distances || [];
+      return `
+        <div class="vc-section">
+          <div class="vc-section-title">${escHtml(t(hass, "distance_trend", { days: ODOMETER_DAYS }))}</div>
+          ${this._renderDistanceBars(distances)}
+        </div>`;
+    }
+
+    _renderDistanceBars(distances) {
+      if (!distances.length || distances.every((v) => v === null)) {
+        return `<svg viewBox="0 0 160 44" width="100%" height="40" class="vc-spark"></svg>`;
+      }
+      const max = Math.max(...distances.filter((v) => v !== null), 1);
+      const n = distances.length;
+      const gap = 160 / n;
+      const barW = gap * 0.55;
+      const bars = distances.map((v, i) => {
+        if (v === null) return "";
+        const x = i * gap + (gap - barW) / 2;
+        const h = Math.max(2, (v / max) * 34);
+        const y = 38 - h;
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--info-color, var(--primary-color))"/>`;
+      }).join("");
+      return `<svg viewBox="0 0 160 44" width="100%" height="40" preserveAspectRatio="none" class="vc-spark">${bars}</svg>`;
+    }
+
     _renderPosition(d, hass) {
       if (!d.tracker) return "";
       const st = hass.states[d.tracker];
@@ -660,8 +891,8 @@
     }
 
     _renderStats(vehicle, d, hass, isEv) {
-      const key = isEv ? "average_energy_consumption" : "average_fuel_consumption";
-      const entityId = d.sensors[key];
+      const key = this._pickStatKey(d, isEv);
+      const entityId = key ? d.sensors[key] : null;
       if (!entityId) return "";
       const st = hass.states[entityId];
       const unit = st?.attributes?.unit_of_measurement || "";
@@ -707,7 +938,9 @@
       if (cached?.fetching) return;
       if (cached?.fetchedAt && now - cached.fetchedAt < HISTORY_MIN_REFRESH_MS) return;
       const d = this._discoverVehicle(deviceId);
-      const entityId = d.sensors.average_energy_consumption || d.sensors.average_fuel_consumption;
+      const isEv = !!d.sensors.battery_charge_level;
+      const key = this._pickStatKey(d, isEv);
+      const entityId = key ? d.sensors[key] : null;
       if (!entityId) return;
 
       this._history.set(deviceId, { ...(cached || {}), fetching: true, fetchedAt: now });
@@ -729,6 +962,77 @@
           console.warn("volvo-cars-card: history fetch failed", err);
           this._history.set(deviceId, { values: [], fetchedAt: Date.now(), fetching: false });
         });
+    }
+
+    _maybeRefreshOdometerHistory(deviceId) {
+      const cached = this._odoHistory.get(deviceId);
+      const now = Date.now();
+      if (cached?.fetching) return;
+      if (cached?.fetchedAt && now - cached.fetchedAt < HISTORY_MIN_REFRESH_MS) return;
+      const d = this._discoverVehicle(deviceId);
+      const entityId = d.sensors.odometer;
+      if (!entityId) return;
+
+      this._odoHistory.set(deviceId, { ...(cached || {}), fetching: true, fetchedAt: now });
+
+      const end = new Date();
+      // +1 day of margin so there's a baseline reading to diff day 0 against.
+      const start = new Date(end.getTime() - (ODOMETER_DAYS + 1) * 24 * 3600 * 1000);
+      const path = `history/period/${localISO(start)}?filter_entity_id=${entityId}&end_time=${localISO(end)}&minimal_response=true&no_attributes=true`;
+
+      this._hass
+        .callApi("GET", path)
+        .then((resp) => {
+          const raw = resp?.[0] ?? [];
+          const distances = this._bucketizeDailyDistance(raw);
+          this._odoHistory.set(deviceId, { distances, fetchedAt: Date.now(), fetching: false });
+          this._render();
+        })
+        .catch((err) => {
+          console.warn("volvo-cars-card: odometer history fetch failed", err);
+          this._odoHistory.set(deviceId, { distances: [], fetchedAt: Date.now(), fetching: false });
+        });
+    }
+
+    // Odometer readings never reset (unlike a power meter), so daily
+    // distance is simply the difference between each day's last known
+    // reading and the previous day's — no reset-aware accumulation needed.
+    _bucketizeDailyDistance(raw) {
+      const points = raw
+        .map((s) => ({
+          t: s.lu ? s.lu * 1000 : new Date(s.last_changed).getTime(),
+          v: parseFloat(s.state),
+        }))
+        .filter((p) => Number.isFinite(p.t) && !isNaN(p.v))
+        .sort((a, b) => a.t - b.t);
+      if (points.length === 0) return [];
+
+      const valueAtOrBefore = (t) => {
+        let val = null;
+        for (const p of points) {
+          if (p.t <= t) val = p.v;
+          else break;
+        }
+        return val;
+      };
+
+      const now = new Date();
+      const dayEndValues = [];
+      for (let i = ODOMETER_DAYS; i >= 0; i--) {
+        const dayStart = new Date(now);
+        dayStart.setHours(0, 0, 0, 0);
+        dayStart.setDate(dayStart.getDate() - i);
+        const dayEnd = i === 0 ? now : new Date(dayStart.getTime() + 24 * 3600 * 1000 - 1000);
+        dayEndValues.push(valueAtOrBefore(dayEnd.getTime()));
+      }
+
+      const distances = [];
+      for (let i = 1; i < dayEndValues.length; i++) {
+        const prev = dayEndValues[i - 1];
+        const cur = dayEndValues[i];
+        distances.push(prev !== null && cur !== null ? Math.max(0, cur - prev) : null);
+      }
+      return distances;
     }
 
     _bucketize(raw, startMs, endMs) {
@@ -771,6 +1075,12 @@
     }
     _iconPin(color) {
       return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 6-9 12-9 12s-9-6-9-12a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>`;
+    }
+    _iconEngine(color) {
+      return `<svg width="18" height="18" viewBox="0 0 24 24" fill="${color}" stroke="none"><path d="M13 2 3 14h6l-1 8 10-12h-6z"/></svg>`;
+    }
+    _iconChevron(color) {
+      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>`;
     }
 
     _css() {
@@ -852,6 +1162,13 @@
           font-size: 10.5px; font-weight: 700; color: var(--secondary-text-color);
           text-transform: uppercase; letter-spacing: 0.05em;
         }
+        .vc-expand-toggle {
+          display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px;
+          background: none; border: none; padding: 0; margin: 0; cursor: pointer; text-align: left;
+        }
+        .vc-expand-summary { font-size: 12px; font-weight: 700; margin-left: auto; }
+        .vc-chevron { flex: 0 0 auto; display: flex; transition: transform 0.15s ease; }
+        .vc-warning-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--primary-text-color); margin-top: 6px; }
         .vc-doors-row { display: flex; gap: 16px; align-items: flex-start; }
         .vc-doors-svg { flex: 0 0 auto; }
         .vc-doors-list { display: flex; flex-direction: column; gap: 7px; padding-top: 6px; }

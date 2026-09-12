@@ -54,11 +54,16 @@ const entities = {
   // XC60 (EV) — device dev_xc60
   "sensor.xc60_battery": { device_id: "dev_xc60", platform: "volvo" }, // no translation_key: battery exception
   "sensor.xc60_range_battery": { device_id: "dev_xc60", translation_key: "distance_to_empty_battery" },
-  "sensor.xc60_avg_energy": { device_id: "dev_xc60", translation_key: "average_energy_consumption" },
+  // Only the "_charge" variant exists here (not the base "average_energy_consumption")
+  // — reproduces the owner's real report: their car only exposes one of the
+  // three energy-consumption variants, and the card must fall back to it.
+  "sensor.xc60_avg_energy": { device_id: "dev_xc60", translation_key: "average_energy_consumption_charge" },
   "sensor.xc60_charging_status": { device_id: "dev_xc60", translation_key: "charging_status" },
   "sensor.xc60_charging_power": { device_id: "dev_xc60", translation_key: "charging_power" },
   "sensor.xc60_charging_time": { device_id: "dev_xc60", translation_key: "estimated_charging_time" },
   "sensor.xc60_charging_target": { device_id: "dev_xc60", translation_key: "target_battery_charge_level" },
+  "sensor.xc60_odometer": { device_id: "dev_xc60", translation_key: "odometer" },
+  "binary_sensor.xc60_tire_fl": { device_id: "dev_xc60", translation_key: "tire_front_left" },
   "lock.xc60_lock": { device_id: "dev_xc60" },
   "device_tracker.xc60_location": { device_id: "dev_xc60" },
   "binary_sensor.xc60_door_fl": { device_id: "dev_xc60", translation_key: "door_front_left" },
@@ -72,10 +77,16 @@ const entities = {
   // V60 (ICE) — device dev_v60, no charging entities at all
   "sensor.v60_fuel": { device_id: "dev_v60", translation_key: "fuel_amount" },
   "sensor.v60_range_tank": { device_id: "dev_v60", translation_key: "distance_to_empty_tank" },
-  "sensor.v60_avg_fuel": { device_id: "dev_v60", translation_key: "average_fuel_consumption" },
+  // Only the "_automatic" variant exists here (not the base "average_fuel_consumption")
+  "sensor.v60_avg_fuel": { device_id: "dev_v60", translation_key: "average_fuel_consumption_automatic" },
+  "sensor.v60_distance_to_service": { device_id: "dev_v60", translation_key: "distance_to_service" },
+  "sensor.v60_time_to_service": { device_id: "dev_v60", translation_key: "time_to_service" },
   "lock.v60_lock": { device_id: "dev_v60" },
   "device_tracker.v60_location": { device_id: "dev_v60" },
   "binary_sensor.v60_door_fl": { device_id: "dev_v60", translation_key: "door_front_left" },
+  "binary_sensor.v60_tank_lid": { device_id: "dev_v60", translation_key: "tank_lid" },
+  "button.v60_engine_start": { device_id: "dev_v60", translation_key: "engine_start" },
+  "button.v60_engine_stop": { device_id: "dev_v60", translation_key: "engine_stop" },
 };
 
 const states = {
@@ -86,6 +97,8 @@ const states = {
   "sensor.xc60_charging_power": state("sensor.xc60_charging_power", "7.4", { unit_of_measurement: "kW" }),
   "sensor.xc60_charging_time": state("sensor.xc60_charging_time", "100", { unit_of_measurement: "min" }),
   "sensor.xc60_charging_target": state("sensor.xc60_charging_target", "90"),
+  "sensor.xc60_odometer": state("sensor.xc60_odometer", "18420", { unit_of_measurement: "km" }),
+  "binary_sensor.xc60_tire_fl": state("binary_sensor.xc60_tire_fl", "on"),
   "lock.xc60_lock": state("lock.xc60_lock", "locked"),
   "device_tracker.xc60_location": state("device_tracker.xc60_location", "home", { latitude: 59.33, longitude: 18.06 }),
   "binary_sensor.xc60_door_fl": state("binary_sensor.xc60_door_fl", "off"),
@@ -99,9 +112,14 @@ const states = {
   "sensor.v60_fuel": state("sensor.v60_fuel", "42", { unit_of_measurement: "L" }),
   "sensor.v60_range_tank": state("sensor.v60_range_tank", "560", { unit_of_measurement: "km" }),
   "sensor.v60_avg_fuel": state("sensor.v60_avg_fuel", "6.2", { unit_of_measurement: "L/100km" }),
+  "sensor.v60_distance_to_service": state("sensor.v60_distance_to_service", "1200", { unit_of_measurement: "km" }),
+  "sensor.v60_time_to_service": state("sensor.v60_time_to_service", "90", { unit_of_measurement: "days" }),
   "lock.v60_lock": state("lock.v60_lock", "unlocked"),
   "device_tracker.v60_location": state("device_tracker.v60_location", "not_home", { latitude: 59.1, longitude: 18.5 }),
   "binary_sensor.v60_door_fl": state("binary_sensor.v60_door_fl", "off"),
+  "binary_sensor.v60_tank_lid": state("binary_sensor.v60_tank_lid", "on"),
+  "button.v60_engine_start": state("button.v60_engine_start", "unknown"),
+  "button.v60_engine_stop": state("button.v60_engine_stop", "unknown"),
 };
 
 const devices = {
@@ -130,7 +148,7 @@ const card = document.createElement("volvo-cars-card");
 stage.appendChild(card);
 card.setConfig({
   vehicles: [
-    { device_id: "dev_xc60", name: "XC60" },
+    { device_id: "dev_xc60", name: "XC60", icon: "mdi:car-electric" },
     { device_id: "dev_v60", name: "V60" },
   ],
   show_stats: true,
@@ -146,6 +164,58 @@ assert("XC60 has a charging section (battery+charging sensors present)", !!vehic
 assert("V60 has NO charging section at all (no charging sensors found)", !vehicles[1].querySelector(".vc-charging"));
 assert("V60 shows fuel range, not a percentage ring", vehicles[1].innerHTML.includes("560 km") && vehicles[1].innerHTML.includes("42 L"));
 assert("XC60 position link resolves to 'Home'", vehicles[0].innerHTML.includes("Home"));
+assert("configured vehicle icon is rendered (regression: the icon field used to be accepted but never shown)", vehicles[0].innerHTML.includes('ha-icon icon="mdi:car-electric"'));
+
+// --- Stats fallback test: only a non-base energy/fuel variant exists ---
+// This reproduces the owner's real report: their EV's average_energy_consumption
+// (base) sensor doesn't exist, only one of the other two variants does.
+assert("XC60 stats section renders using the '_charge' energy variant (not the missing base key)", vehicles[0].innerHTML.includes("18.4"));
+assert("V60 stats section renders using the '_automatic' fuel variant (not the missing base key)", vehicles[1].innerHTML.includes("6.2"));
+
+// --- Extended door diagram: tank_lid (new zone) shows up in the open list ---
+assert("V60's open tank_lid appears in the doors list (extended diagram zone)", vehicles[1].innerHTML.includes("Fuel/charge flap"));
+
+// --- Service & health section ---
+const xc60Toggle = vehicles[0].querySelector('[data-action="toggle-service"]');
+assert("XC60 has a Service & health section (odometer + an active tire warning present)", !!xc60Toggle);
+assert("collapsed summary shows an issue count (one active tire warning)", xc60Toggle.innerHTML.includes("1 issue"));
+assert("detail rows are NOT shown while collapsed", !vehicles[0].querySelector(".vc-warning-row"));
+xc60Toggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+let vXc60Service = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+assert("expanding reveals the odometer reading", vXc60Service.innerHTML.includes("18420"));
+assert("expanding reveals the active tire warning", vXc60Service.innerHTML.includes("Front left tire pressure"));
+
+// The xc60Toggle click above replaced the whole shadow DOM, so re-query
+// V60 fresh too rather than reusing the (now detached) original reference.
+let vV60Service = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+const v60Toggle = vV60Service.querySelector('[data-action="toggle-service"]');
+assert("V60 has a Service & health section (distance/time to service present)", !!v60Toggle);
+assert("V60's collapsed summary shows 'All good' (no active warnings)", v60Toggle.innerHTML.includes("All good"));
+
+// --- Engine action (fuel/PHEV only) ---
+let vV60Engine = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+const engineBtn = vV60Engine.querySelector('[data-action="arm"][data-arm="engine"]');
+assert("engine action button exists for V60 (has engine_start + engine_stop)", !!engineBtn);
+assert("XC60 has NO engine action button (pure EV, no engine_start/stop entities)", !vXc60Service.querySelector('[data-action="arm"][data-arm="engine"]'));
+engineBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+vV60Engine = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+const engineChip = vV60Engine.querySelector('[data-action="confirm-engine"]');
+assert("arming engine reveals a confirm chip", !!engineChip);
+engineChip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+const engineCall = serviceCalls.find((c) => c.domain === "button" && c.data.entity_id === "button.v60_engine_start");
+assert("confirming engine (currently off) calls button.press on engine_start", !!engineCall && engineCall.service === "press");
+
+// --- Daily distance bucketing (pure logic, called directly on the element) ---
+const now = Date.now();
+const day = 24 * 3600 * 1000;
+const syntheticOdometerHistory = [
+  { lu: Math.floor((now - 8 * day) / 1000), state: "1000" },
+  { lu: Math.floor((now - 1 * day - 3600 * 1000) / 1000), state: "1120" },
+  { lu: Math.floor((now - 3600 * 1000) / 1000), state: "1150" },
+];
+const distances = card._bucketizeDailyDistance(syntheticOdometerHistory);
+assert("daily distance bucketing returns one entry per configured day", distances.length === 7);
+assert("today's distance reflects the most recent delta (1150 - 1120 = 30)", distances[distances.length - 1] === 30);
 
 // --- Layout option test ---
 const gridEl = card.shadowRoot.querySelector(".vc-grid");
