@@ -1,0 +1,206 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>volvo-cars-card test</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #111; color: #eee; padding: 16px; }
+  #results { margin-bottom: 24px; }
+  .pass { color: #4caf50; }
+  .fail { color: #ef5350; font-weight: bold; }
+  #summary { font-size: 18px; font-weight: bold; margin-bottom: 12px; padding: 8px 12px; border-radius: 6px; }
+  #stage { border: 1px solid #333; padding: 16px; background: #1a1a1a; }
+  volvo-cars-card, volvo-cars-card-editor { display: block; margin-bottom: 16px; }
+  /* Minimal HA CSS variable stand-ins so the card isn't unstyled */
+  :root {
+    --primary-text-color: #e1e1e1;
+    --secondary-text-color: #9a9a9a;
+    --card-background-color: #1c1c1c;
+    --secondary-background-color: #262626;
+    --divider-color: #333;
+    --success-color: #43a047;
+    --error-color: #db4437;
+    --warning-color: #ff9800;
+    --info-color: #03a9f4;
+    --primary-color: #03a9f4;
+    --ha-card-border-radius: 12px;
+    --ha-card-box-shadow: none;
+    --ha-card-background: var(--card-background-color);
+  }
+</style>
+</head>
+<body>
+<h1>volvo-cars-card — scripted smoke test</h1>
+<div id="summary">Running…</div>
+<ul id="results"></ul>
+<div id="stage"></div>
+
+<script src="../volvo-cars-card.js"></script>
+<script>
+const results = [];
+function assert(desc, cond) {
+  results.push({ desc, pass: !!cond });
+  if (!cond) console.error("FAIL:", desc);
+}
+
+function state(id, value, attrs) {
+  return { entity_id: id, state: value, attributes: attrs || {} };
+}
+
+// --- Mock hass -------------------------------------------------------
+const serviceCalls = [];
+
+const entities = {
+  // XC60 (EV) — device dev_xc60
+  "sensor.xc60_battery": { device_id: "dev_xc60", platform: "volvo" }, // no translation_key: battery exception
+  "sensor.xc60_range_battery": { device_id: "dev_xc60", translation_key: "distance_to_empty_battery" },
+  "sensor.xc60_avg_energy": { device_id: "dev_xc60", translation_key: "average_energy_consumption" },
+  "sensor.xc60_charging_status": { device_id: "dev_xc60", translation_key: "charging_status" },
+  "sensor.xc60_charging_power": { device_id: "dev_xc60", translation_key: "charging_power" },
+  "sensor.xc60_charging_time": { device_id: "dev_xc60", translation_key: "estimated_charging_time" },
+  "sensor.xc60_charging_target": { device_id: "dev_xc60", translation_key: "target_battery_charge_level" },
+  "lock.xc60_lock": { device_id: "dev_xc60" },
+  "device_tracker.xc60_location": { device_id: "dev_xc60" },
+  "binary_sensor.xc60_door_fl": { device_id: "dev_xc60", translation_key: "door_front_left" },
+  "binary_sensor.xc60_window_fl": { device_id: "dev_xc60", translation_key: "window_front_left" },
+  "button.xc60_clim_start": { device_id: "dev_xc60", translation_key: "climatization_start" },
+  "button.xc60_clim_stop": { device_id: "dev_xc60", translation_key: "climatization_stop" },
+  "button.xc60_honk_flash": { device_id: "dev_xc60", translation_key: "honk_flash" },
+
+  // V60 (ICE) — device dev_v60, no charging entities at all
+  "sensor.v60_fuel": { device_id: "dev_v60", translation_key: "fuel_amount" },
+  "sensor.v60_range_tank": { device_id: "dev_v60", translation_key: "distance_to_empty_tank" },
+  "sensor.v60_avg_fuel": { device_id: "dev_v60", translation_key: "average_fuel_consumption" },
+  "lock.v60_lock": { device_id: "dev_v60" },
+  "device_tracker.v60_location": { device_id: "dev_v60" },
+  "binary_sensor.v60_door_fl": { device_id: "dev_v60", translation_key: "door_front_left" },
+};
+
+const states = {
+  "sensor.xc60_battery": state("sensor.xc60_battery", "78", { device_class: "battery", unit_of_measurement: "%" }),
+  "sensor.xc60_range_battery": state("sensor.xc60_range_battery", "410", { unit_of_measurement: "km" }),
+  "sensor.xc60_avg_energy": state("sensor.xc60_avg_energy", "18.4", { unit_of_measurement: "kWh/100km" }),
+  "sensor.xc60_charging_status": state("sensor.xc60_charging_status", "CHARGING"),
+  "sensor.xc60_charging_power": state("sensor.xc60_charging_power", "7.4", { unit_of_measurement: "kW" }),
+  "sensor.xc60_charging_time": state("sensor.xc60_charging_time", "100", { unit_of_measurement: "min" }),
+  "sensor.xc60_charging_target": state("sensor.xc60_charging_target", "90"),
+  "lock.xc60_lock": state("lock.xc60_lock", "locked"),
+  "device_tracker.xc60_location": state("device_tracker.xc60_location", "home", { latitude: 59.33, longitude: 18.06 }),
+  "binary_sensor.xc60_door_fl": state("binary_sensor.xc60_door_fl", "off"),
+  "binary_sensor.xc60_window_fl": state("binary_sensor.xc60_window_fl", "on"),
+  "button.xc60_clim_start": state("button.xc60_clim_start", "unknown"),
+  "button.xc60_clim_stop": state("button.xc60_clim_stop", "unknown"),
+  "button.xc60_honk_flash": state("button.xc60_honk_flash", "unknown"),
+
+  "sensor.v60_fuel": state("sensor.v60_fuel", "42", { unit_of_measurement: "L" }),
+  "sensor.v60_range_tank": state("sensor.v60_range_tank", "560", { unit_of_measurement: "km" }),
+  "sensor.v60_avg_fuel": state("sensor.v60_avg_fuel", "6.2", { unit_of_measurement: "L/100km" }),
+  "lock.v60_lock": state("lock.v60_lock", "unlocked"),
+  "device_tracker.v60_location": state("device_tracker.v60_location", "not_home", { latitude: 59.1, longitude: 18.5 }),
+  "binary_sensor.v60_door_fl": state("binary_sensor.v60_door_fl", "off"),
+};
+
+const devices = {
+  dev_xc60: { id: "dev_xc60", name: "XC60", name_by_user: null, manufacturer: "Volvo" },
+  dev_v60: { id: "dev_v60", name: "V60", name_by_user: null, manufacturer: "Volvo" },
+  dev_other: { id: "dev_other", name: "Some Router", name_by_user: null, manufacturer: "Ubiquiti" },
+};
+
+const hass = {
+  states,
+  entities,
+  devices,
+  language: "en",
+  locale: { language: "en" },
+  callApi: () => Promise.resolve([[]]), // no history in this test — exercises the "no data" sparkline path
+  callService: (domain, service, data) => {
+    serviceCalls.push({ domain, service, data });
+    return Promise.resolve();
+  },
+};
+
+const stage = document.getElementById("stage");
+
+// --- Card render test --------------------------------------------------
+const card = document.createElement("volvo-cars-card");
+stage.appendChild(card);
+card.setConfig({
+  vehicles: [
+    { device_id: "dev_xc60", name: "XC60" },
+    { device_id: "dev_v60", name: "V60" },
+  ],
+  show_stats: true,
+});
+card.hass = hass;
+
+const vehicles = card.shadowRoot.querySelectorAll(".vc-vehicle");
+assert("card renders without throwing", !!card.shadowRoot.querySelector(".vc-card"));
+assert("renders two vehicle sections", vehicles.length === 2);
+assert("XC60 shows battery ring percentage", vehicles[0].innerHTML.includes("78%"));
+assert("XC60 shows open window in doors list", vehicles[0].innerHTML.includes("open"));
+assert("XC60 has a charging section (battery+charging sensors present)", !!vehicles[0].querySelector(".vc-charging"));
+assert("V60 has NO charging section at all (no charging sensors found)", !vehicles[1].querySelector(".vc-charging"));
+assert("V60 shows fuel range, not a percentage ring", vehicles[1].innerHTML.includes("560 km") && vehicles[1].innerHTML.includes("42 L"));
+assert("XC60 position link resolves to 'Home'", vehicles[0].innerHTML.includes("Home"));
+
+// --- Lock button test ---
+const lockBtn = vehicles[0].querySelector('[data-action="toggle-lock"]');
+assert("lock button exists for XC60", !!lockBtn);
+lockBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+const lockCall = serviceCalls.find((c) => c.domain === "lock");
+assert("clicking lock (currently locked) calls lock.unlock", lockCall && lockCall.service === "unlock" && lockCall.data.entity_id === "lock.xc60_lock");
+
+// --- Honk button test ---
+const honkBtn = vehicles[0].querySelector('[data-action="honk"]');
+assert("honk button exists for XC60", !!honkBtn);
+honkBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+const honkCall = serviceCalls.find((c) => c.domain === "button" && c.data.entity_id === "button.xc60_honk_flash");
+assert("clicking honk calls button.press on honk_flash entity", !!honkCall && honkCall.service === "press");
+
+// --- Editor test ---------------------------------------------------
+const editor = document.createElement("volvo-cars-card-editor");
+stage.appendChild(editor);
+let lastConfig = null;
+editor.addEventListener("config-changed", (e) => { lastConfig = e.detail.config; });
+editor.setConfig({ vehicles: [], show_stats: true, stats_history_hours: 168 });
+editor.hass = hass;
+
+assert("editor starts with zero vehicle rows", editor.shadowRoot.querySelectorAll(".ed-row").length === 0);
+
+const addBtn = editor.shadowRoot.querySelector('[data-action="add-vehicle"]');
+assert("add-vehicle button exists", !!addBtn);
+addBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+assert("clicking 'add vehicle' fires config-changed (regression: this used to silently no-op)", lastConfig !== null && lastConfig.vehicles.length === 1);
+assert("editor now shows one row", editor.shadowRoot.querySelectorAll(".ed-row").length === 1);
+
+const select = editor.shadowRoot.querySelector(".ed-select");
+assert("device dropdown exists in the row", !!select);
+const optionLabels = Array.from(select.options).map((o) => o.textContent);
+assert("dropdown lists Volvo devices (XC60, V60)", optionLabels.includes("XC60") && optionLabels.includes("V60"));
+assert("dropdown excludes non-Volvo devices", !optionLabels.includes("Some Router"));
+
+const showStatsCheckbox = editor.shadowRoot.querySelector('[data-field="show_stats"]');
+assert("show_stats checkbox exists", !!showStatsCheckbox);
+showStatsCheckbox.checked = false;
+showStatsCheckbox.dispatchEvent(new Event("change", { bubbles: true }));
+assert("toggling show_stats fires config-changed with the new value (regression: used to require data-idx and silently no-op)", lastConfig.show_stats === false);
+
+// --- Render summary ------------------------------------------------
+const list = document.getElementById("results");
+results.forEach((r) => {
+  const li = document.createElement("li");
+  li.className = r.pass ? "pass" : "fail";
+  li.textContent = (r.pass ? "PASS — " : "FAIL — ") + r.desc;
+  list.appendChild(li);
+});
+const failCount = results.filter((r) => !r.pass).length;
+const summary = document.getElementById("summary");
+summary.textContent = failCount === 0
+  ? `All ${results.length} checks passed`
+  : `${failCount} of ${results.length} checks FAILED`;
+summary.style.background = failCount === 0 ? "#1b3a1f" : "#3a1b1b";
+summary.style.color = failCount === 0 ? "#4caf50" : "#ef5350";
+</script>
+</body>
+</html>

@@ -48,6 +48,7 @@
       editor_icon: "Icon (optional)",
       editor_show_stats: "Show statistics",
       editor_stats_hours: "Statistics window (hours)",
+      editor_select_device: "Select a device…",
       waiting: "Waiting for data…",
     },
     sv: {
@@ -92,6 +93,7 @@
       editor_icon: "Ikon (valfritt)",
       editor_show_stats: "Visa statistik",
       editor_stats_hours: "Statistikfönster (timmar)",
+      editor_select_device: "Välj en enhet…",
       waiting: "Väntar på data…",
     },
   };
@@ -774,7 +776,6 @@
       this._config = { vehicles: [], show_stats: true, stats_history_hours: DEFAULT_STATS_HOURS };
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
       this.shadowRoot.addEventListener("change", (e) => this._onFieldChange(e));
-      this.shadowRoot.addEventListener("value-changed", (e) => this._onPickerChange(e));
     }
 
     setConfig(config) {
@@ -793,7 +794,6 @@
     set hass(hass) {
       this._hass = hass;
       this._render();
-      this._bindPickers();
     }
 
     _fireConfigChanged() {
@@ -811,6 +811,7 @@
       if (action === "add-vehicle") {
         this._config.vehicles.push({ device_id: "", name: "", icon: "" });
         this._render();
+        this._fireConfigChanged();
       } else if (action === "remove-vehicle") {
         const idx = Number(el.dataset.idx);
         this._config.vehicles.splice(idx, 1);
@@ -835,34 +836,29 @@
       this._fireConfigChanged();
     }
 
-    _onPickerChange(e) {
-      const el = e.target;
-      if (el.matches && el.matches('ha-device-picker[data-field="device_id"]')) {
-        e.stopPropagation();
-        const idx = Number(el.dataset.idx);
-        if (this._config.vehicles[idx]) {
-          this._config.vehicles[idx].device_id = e.detail.value || "";
-          this._fireConfigChanged();
-        }
-      }
-    }
-
-    _bindPickers() {
-      if (!this.shadowRoot || !this._hass) return;
-      const hass = this._hass;
-      this.shadowRoot.querySelectorAll('ha-device-picker[data-field="device_id"]').forEach((el) => {
-        const idx = Number(el.dataset.idx);
-        el.hass = hass;
-        el.value = this._config.vehicles[idx]?.device_id || "";
-        el.label = t(hass, "editor_device");
-      });
+    // Volvo integration devices always report manufacturer "Volvo"
+    // (verified against homeassistant/components/volvo/const.py). Falls
+    // back to listing every device if none match, so the editor never
+    // shows an empty list for the user to get stuck on.
+    _deviceOptions() {
+      const devices = this._hass?.devices || {};
+      const all = Object.values(devices);
+      const volvoOnes = all.filter((d) => d.manufacturer === "Volvo");
+      const list = volvoOnes.length ? volvoOnes : all;
+      return list
+        .map((d) => ({ id: d.id, label: d.name_by_user || d.name || d.id }))
+        .sort((a, b) => a.label.localeCompare(b.label));
     }
 
     _render() {
       const hass = this._hass;
+      const deviceOptions = this._deviceOptions();
       const rows = this._config.vehicles.map((v, idx) => `
         <div class="ed-row">
-          <ha-device-picker class="ed-picker" data-idx="${idx}" data-field="device_id"></ha-device-picker>
+          <select class="ed-input ed-select" data-idx="${idx}" data-field="device_id">
+            <option value="" ${v.device_id ? "" : "selected"}>${escHtml(t(hass, "editor_select_device"))}</option>
+            ${deviceOptions.map((o) => `<option value="${escHtml(o.id)}" ${o.id === v.device_id ? "selected" : ""}>${escHtml(o.label)}</option>`).join("")}
+          </select>
           <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "editor_name"))}" data-idx="${idx}" data-field="name" value="${escHtml(v.name)}" />
           <input class="ed-input ed-icon" type="text" placeholder="${escHtml(t(hass, "editor_icon"))}" data-idx="${idx}" data-field="icon" value="${escHtml(v.icon)}" />
           <button class="ed-remove" type="button" data-action="remove-vehicle" data-idx="${idx}" title="${escHtml(t(hass, "editor_remove"))}">✕</button>
@@ -873,8 +869,8 @@
           .ed-wrap { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
           .ed-label { font-size: 12px; font-weight: 600; color: var(--secondary-text-color); }
           .ed-row { display: flex; gap: 6px; align-items: center; }
-          .ed-picker { flex: 1 1 auto; min-width: 0; }
           .ed-input { flex: 1 1 auto; min-width: 0; padding: 8px; border: 1px solid var(--divider-color); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); }
+          .ed-select { flex: 1.4 1 auto; }
           .ed-icon { flex: 0 0 90px; }
           .ed-remove {
             flex: 0 0 auto; width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--divider-color);
@@ -900,7 +896,6 @@
             <input class="ed-hours" type="number" min="1" data-field="stats_history_hours" value="${this._config.stats_history_hours}" />
           </div>
         </div>`;
-      this._bindPickers();
     }
   }
 
