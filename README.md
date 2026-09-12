@@ -71,6 +71,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 | `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, currently unused, reserved) |
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
+| `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
 
 ```yaml
 type: custom:volvo-cars-card
@@ -103,6 +104,10 @@ show_stats: true
 ---
 
 ## Changelog
+
+### 0.5.4 (2026-09-12)
+
+- Added a `layout` option (`auto` / `horizontal` / `vertical`) so vehicles can be forced side by side even in a narrow dashboard column, instead of always wrapping to a single column
 
 ### 0.5.3 (2026-09-12)
 
