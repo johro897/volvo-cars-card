@@ -77,6 +77,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
+| `title` | string | *(none — auto-translated, "Volvo Cars"/"Volvo Cars")* | Card header text. Set to an empty string to hide the header row entirely. |
 
 ```yaml
 type: custom:volvo-cars-card
@@ -115,6 +116,10 @@ show_stats: true
 ---
 
 ## Changelog
+
+### 0.6.2 (2026-09-12)
+
+- Added a `title` config option — the header was previously a hardcoded, non-configurable "Volvo Cars" string with no way to change or hide it
 
 ### 0.6.1 (2026-09-12)
 
