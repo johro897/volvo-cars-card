@@ -104,6 +104,11 @@ show_stats: true
 
 ## Changelog
 
+### 0.5.2 (2026-09-12)
+
+- Fixed the visual editor dropping `type` from the card config on every edit (e.g. clicking "+ Add vehicle"), which made Home Assistant's edit dialog report "No card type configured" even though the card itself was configured correctly
+- Added a regression test asserting `type` survives editor round-trips
+
 ### 0.5.1 (2026-09-12)
 
 Found by the owner testing `0.5.0` against real vehicles for the first time:
