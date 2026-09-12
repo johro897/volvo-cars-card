@@ -15,8 +15,11 @@ Unlike many custom cards, this one requires no external dependencies — no char
 - **Doors & windows** — a top-down diagram highlighting only the open door/window/hood/tailgate, plus a plain-text summary
 - **Quick actions with confirm** — lock/unlock, climatization on/off, and horn/lights (offered separately as Horn, Lights, or Horn & lights) all call the vehicle's real Home Assistant services, but only after an extra confirm tap — the first tap just reveals the choice, nothing happens until you tap again
 - **Charging status** (electric/plug-in hybrid only) — status, power, time left, target level; the whole section is simply absent for a combustion-only vehicle, not just hidden
+- **Engine start/stop** (combustion/PHEV only) — same tap-to-confirm flow as the other actions
+- **Service & health** — odometer, distance/time/engine-hours to service, and a curated set of fluid and tire-pressure warnings; collapsed to a one-line summary ("All good" or an issue count), expands to full detail on tap
 - **Location** — an "open in map" link from the vehicle's device tracker
-- **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window)
+- **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window); automatically falls back between the integration's different sensor variants depending on which one your vehicle actually exposes
+- **Distance driven** — a 7-day bar chart derived from odometer history (day-over-day distance, not a fake trip list)
 - **Multiple vehicles** in one card, each configured independently
 - Visual (GUI) editor — no YAML required to get started
 - UI auto-translates to your Home Assistant language — English or Swedish (falls back to English)
@@ -68,7 +71,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, currently unused, reserved) |
+| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name) |
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
@@ -87,9 +90,9 @@ show_stats: true
 
 ## Not included (yet)
 
-- **`engine_start`/`engine_stop`** (pre-heat the engine on a combustion/PHEV vehicle) — a possible follow-up, tracked as a GitHub issue.
 - **An embedded map** instead of an "open in map" link — no map library is used in this project; a real embedded map would be a separate, larger decision.
-- **Trip-by-trip history** (individual trips with date/distance/route, like Volvo's own app) — deliberately not built. Home Assistant's official `Volvo` integration only exposes cumulative trip-meter and average-speed sensors, not a per-trip list; the old `volvooncall` integration that did expose trip data is deprecated and known to over-poll Volvo's API.
+- **Trip-by-trip history** (individual trips with date/distance/route, like Volvo's own app) — deliberately not built. Home Assistant's official `Volvo` integration only exposes cumulative trip-meter and average-speed sensors, not a per-trip list; the old `volvooncall` integration that did expose trip data is deprecated and known to over-poll Volvo's API. The distance-driven trend above is the closest honest substitute.
+- Only a curated subset of the integration's warning sensors are shown (fluids, tire pressure) — the dozen individual light-bulb-failure warnings aren't included yet.
 
 ---
 
@@ -101,9 +104,22 @@ show_stats: true
 
 **Nothing shows up at all.** Make sure you picked the right HA **device** (not entity) in the editor — one device per vehicle, as created by the official Volvo integration.
 
+**No consumption stat/sparkline shows up even though I have a Volvo EV/combustion car.** The integration only creates a sensor at all if Volvo's API actually returns that specific field for your vehicle, and there are several variants of the consumption sensor. The card tries all of them, so if you still see nothing, check **Developer Tools → States** for any entity under your car's device whose name contains "average energy consumption" or "average fuel consumption" — if none exist at all, your vehicle simply doesn't expose this data via the integration.
+
+**The vehicle icon (`icon:` config option) doesn't show up.** It's rendered with Home Assistant's own `<ha-icon>` element, which — unlike the custom `<select>` this card builds for the device picker — is not something built ourselves, so it's a (much lower-risk, but not zero-risk) assumption that it's always available. If it doesn't render, leave `icon` unset; nothing else depends on it.
+
 ---
 
 ## Changelog
+
+### 0.6.0 (2026-09-12)
+
+- **Fixed a real bug**: the average energy/fuel consumption stat was missing for vehicles that only expose a non-default sensor variant (`_automatic` or `_charge`) rather than the base one — the card now tries all variants
+- Added a **Service & health** section: odometer, distance/time/engine-hours to service, and fluid/tire-pressure warnings, collapsed to a one-line summary by default
+- Added **engine start/stop** as a fourth quick action (combustion/PHEV vehicles only)
+- Added a **distance-driven** 7-day bar chart derived from odometer history
+- Extended the door/window diagram with sunroof, tank/charge flap, and rear window zones
+- Wired up the previously-unused `icon` config option into the vehicle header
 
 ### 0.5.5 (2026-09-12)
 
