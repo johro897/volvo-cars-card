@@ -25,6 +25,13 @@
       lock_action: "Lock / unlock",
       climate_action: "Climate",
       honk_action: "Horn & lights",
+      confirm_lock: "Tap to lock",
+      confirm_unlock: "Tap to unlock",
+      confirm_climate_on: "Tap to start climate",
+      confirm_climate_off: "Tap to stop climate",
+      honk_horn: "Horn",
+      honk_lights: "Lights",
+      honk_both: "Horn & lights",
       door_front_left: "Front left door",
       door_front_right: "Front right door",
       door_rear_left: "Rear left door",
@@ -74,6 +81,13 @@
       lock_action: "Lås / lås upp",
       climate_action: "Klimat",
       honk_action: "Signalhorn & blink",
+      confirm_lock: "Tryck för att låsa",
+      confirm_unlock: "Tryck för att låsa upp",
+      confirm_climate_on: "Tryck för att starta klimat",
+      confirm_climate_off: "Tryck för att stoppa klimat",
+      honk_horn: "Signalhorn",
+      honk_lights: "Blink",
+      honk_both: "Signalhorn & blink",
       door_front_left: "Framdörr vänster",
       door_front_right: "Framdörr höger",
       door_rear_left: "Bakdörr vänster",
@@ -150,7 +164,8 @@
     "window_front_left", "window_front_right", "window_rear_left", "window_rear_right",
     "sunroof",
   ];
-  const BUTTON_KEYS = ["climatization_start", "climatization_stop", "honk_flash"];
+  const BUTTON_KEYS = ["climatization_start", "climatization_stop", "honk", "flash", "honk_flash"];
+  const ARM_TIMEOUT_MS = 5000;
 
   const SENSOR_KEY_SET = new Set(SENSOR_KEYS);
   const DOOR_WINDOW_KEY_SET = new Set(DOOR_WINDOW_KEYS);
@@ -191,6 +206,8 @@
       this._config = null;
       this._history = new Map(); // deviceId -> { values, fetchedAt, fetching }
       this._pulses = new Map(); // deviceId -> boolean (honk pulse)
+      this._armed = new Map(); // deviceId -> "lock" | "climate" | "honk" | undefined
+      this._armTimers = new Map(); // deviceId -> setTimeout id, auto-dismisses an armed action
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
     }
 
@@ -301,30 +318,70 @@
       if (!el) return;
       const action = el.dataset.action;
       const deviceId = el.dataset.device;
-      if (action === "toggle-lock") {
-        this._toggleLock(deviceId);
-      } else if (action === "toggle-climate") {
-        this._toggleClimate(deviceId);
-      } else if (action === "honk") {
-        this._honk(deviceId);
+      if (action === "arm") {
+        this._toggleArmed(deviceId, el.dataset.arm);
+      } else if (action === "confirm-lock") {
+        this._confirmLock(deviceId);
+      } else if (action === "confirm-climate") {
+        this._confirmClimate(deviceId);
+      } else if (action === "honk-horn" || action === "honk-lights" || action === "honk-both") {
+        this._confirmHonk(deviceId, action);
       }
     }
 
-    _toggleLock(deviceId) {
+    // Every action (lock, climate, horn/lights) requires an extra tap: the
+    // icon only "arms" a row of confirm chips — nothing actually happens
+    // until one of those chips is tapped. Arming auto-dismisses after
+    // ARM_TIMEOUT_MS so a stray tap doesn't leave a live action sitting
+    // exposed indefinitely.
+    _toggleArmed(deviceId, action) {
+      const current = this._armed.get(deviceId);
+      this._clearArmTimer(deviceId);
+      if (current === action) {
+        this._armed.delete(deviceId);
+      } else {
+        this._armed.set(deviceId, action);
+        const timerId = setTimeout(() => {
+          this._armed.delete(deviceId);
+          this._armTimers.delete(deviceId);
+          this._render();
+        }, ARM_TIMEOUT_MS);
+        this._armTimers.set(deviceId, timerId);
+      }
+      this._render();
+    }
+
+    _clearArmTimer(deviceId) {
+      const timerId = this._armTimers.get(deviceId);
+      if (timerId) {
+        clearTimeout(timerId);
+        this._armTimers.delete(deviceId);
+      }
+    }
+
+    _disarm(deviceId) {
+      this._clearArmTimer(deviceId);
+      this._armed.delete(deviceId);
+    }
+
+    _confirmLock(deviceId) {
       const d = this._discoverVehicle(deviceId);
-      if (!d.lock || !this._hass) return;
+      this._disarm(deviceId);
+      if (!d.lock || !this._hass) { this._render(); return; }
       const st = this._hass.states[d.lock];
       const isLocked = st?.state === "locked";
       this._hass
         .callService("lock", isLocked ? "unlock" : "lock", { entity_id: d.lock })
         .catch(() => {});
+      this._render();
     }
 
-    _toggleClimate(deviceId) {
+    _confirmClimate(deviceId) {
       const d = this._discoverVehicle(deviceId);
+      this._disarm(deviceId);
       const startId = d.buttons.climatization_start;
       const stopId = d.buttons.climatization_stop;
-      if (!startId || !stopId || !this._hass) return;
+      if (!startId || !stopId || !this._hass) { this._render(); return; }
       const wasOn = this._climateState(deviceId);
       const target = wasOn ? stopId : startId;
       this._hass.callService("button", "press", { entity_id: target }).catch(() => {});
@@ -338,10 +395,13 @@
       return this._climateLocal.get(deviceId) || false;
     }
 
-    _honk(deviceId) {
+    _confirmHonk(deviceId, action) {
       const d = this._discoverVehicle(deviceId);
-      const id = d.buttons.honk_flash;
-      if (!id || !this._hass) return;
+      this._disarm(deviceId);
+      const id = action === "honk-horn" ? d.buttons.honk
+        : action === "honk-lights" ? d.buttons.flash
+        : d.buttons.honk_flash;
+      if (!id || !this._hass) { this._render(); return; }
       this._hass.callService("button", "press", { entity_id: id }).catch(() => {});
       this._pulses.set(deviceId, true);
       this._render();
@@ -436,30 +496,51 @@
 
       const climateAvailable = !!(d.buttons.climatization_start && d.buttons.climatization_stop);
       const climateOn = this._climateState(vehicle.device_id);
-      const honkAvailable = !!d.buttons.honk_flash;
+      const honkAvailable = !!(d.buttons.honk || d.buttons.flash || d.buttons.honk_flash);
       const pulsing = this._pulses.get(vehicle.device_id);
+      const armed = this._armed.get(vehicle.device_id);
+      const armedRing = (key) => armed === key ? `box-shadow:0 0 0 2px var(--primary-color);` : "";
+      const dev = escHtml(vehicle.device_id);
 
       const buttonsHtml = `
         <div class="vc-actions">
           ${d.lock ? `
-            <button class="vc-action-btn" data-action="toggle-lock" data-device="${escHtml(vehicle.device_id)}"
+            <button class="vc-action-btn" data-action="arm" data-arm="lock" data-device="${dev}"
               title="${escHtml(t(hass, "lock_action"))}"
-              style="background:${lockKnown ? (isLocked ? TINT_SUCCESS : TINT_ERROR) : "var(--secondary-background-color)"};">
+              style="background:${lockKnown ? (isLocked ? TINT_SUCCESS : TINT_ERROR) : "var(--secondary-background-color)"};${armedRing("lock")}">
               ${isLocked ? this._iconLockClosed(lockColorVar) : this._iconLockOpen(lockColorVar)}
             </button>` : ""}
           ${climateAvailable ? `
-            <button class="vc-action-btn" data-action="toggle-climate" data-device="${escHtml(vehicle.device_id)}"
+            <button class="vc-action-btn" data-action="arm" data-arm="climate" data-device="${dev}"
               title="${escHtml(t(hass, "climate_action"))}"
-              style="background:${climateOn ? TINT_INFO : "var(--secondary-background-color)"};">
+              style="background:${climateOn ? TINT_INFO : "var(--secondary-background-color)"};${armedRing("climate")}">
               ${this._iconClimate(climateOn ? "var(--info-color, var(--primary-color))" : "var(--secondary-text-color)")}
             </button>` : ""}
           ${honkAvailable ? `
-            <button class="vc-action-btn" data-action="honk" data-device="${escHtml(vehicle.device_id)}"
+            <button class="vc-action-btn" data-action="arm" data-arm="honk" data-device="${dev}"
               title="${escHtml(t(hass, "honk_action"))}"
-              style="background:${pulsing ? TINT_WARNING : "var(--secondary-background-color)"};">
+              style="background:${pulsing ? TINT_WARNING : "var(--secondary-background-color)"};${armedRing("honk")}">
               ${this._iconHonk(pulsing ? "var(--warning-color)" : "var(--secondary-text-color)")}
             </button>` : ""}
         </div>
+        ${armed === "lock" ? `
+          <div class="vc-confirm-row">
+            <button class="vc-confirm-chip" data-action="confirm-lock" data-device="${dev}">
+              ${escHtml(isLocked ? t(hass, "confirm_unlock") : t(hass, "confirm_lock"))}
+            </button>
+          </div>` : ""}
+        ${armed === "climate" ? `
+          <div class="vc-confirm-row">
+            <button class="vc-confirm-chip" data-action="confirm-climate" data-device="${dev}">
+              ${escHtml(climateOn ? t(hass, "confirm_climate_off") : t(hass, "confirm_climate_on"))}
+            </button>
+          </div>` : ""}
+        ${armed === "honk" ? `
+          <div class="vc-confirm-row">
+            ${d.buttons.honk ? `<button class="vc-confirm-chip" data-action="honk-horn" data-device="${dev}">${escHtml(t(hass, "honk_horn"))}</button>` : ""}
+            ${d.buttons.flash ? `<button class="vc-confirm-chip" data-action="honk-lights" data-device="${dev}">${escHtml(t(hass, "honk_lights"))}</button>` : ""}
+            ${d.buttons.honk_flash ? `<button class="vc-confirm-chip" data-action="honk-both" data-device="${dev}">${escHtml(t(hass, "honk_both"))}</button>` : ""}
+          </div>` : ""}
         <div class="vc-status-line">
           <span style="color:${lockColorVar};">${escHtml(lockLabel)}</span>
           ${climateAvailable && climateOn ? `<span class="vc-status-sep">·</span><span style="color:var(--info-color, var(--primary-color));">${escHtml(t(hass, "climate_on"))}</span>` : ""}
@@ -759,6 +840,12 @@
           display: flex; align-items: center; justify-content: center;
         }
         .vc-status-line { position: relative; display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 700; }
+        .vc-confirm-row { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+        .vc-confirm-chip {
+          min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--divider-color);
+          background: var(--card-background-color); color: var(--primary-text-color);
+          font-size: 12px; font-weight: 600; cursor: pointer;
+        }
         .vc-status-sep { color: var(--secondary-text-color); }
         .vc-section { display: flex; flex-direction: column; gap: 8px; }
         .vc-section-title {

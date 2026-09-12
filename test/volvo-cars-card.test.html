@@ -65,6 +65,8 @@ const entities = {
   "binary_sensor.xc60_window_fl": { device_id: "dev_xc60", translation_key: "window_front_left" },
   "button.xc60_clim_start": { device_id: "dev_xc60", translation_key: "climatization_start" },
   "button.xc60_clim_stop": { device_id: "dev_xc60", translation_key: "climatization_stop" },
+  "button.xc60_honk": { device_id: "dev_xc60", translation_key: "honk" },
+  "button.xc60_flash": { device_id: "dev_xc60", translation_key: "flash" },
   "button.xc60_honk_flash": { device_id: "dev_xc60", translation_key: "honk_flash" },
 
   // V60 (ICE) — device dev_v60, no charging entities at all
@@ -90,6 +92,8 @@ const states = {
   "binary_sensor.xc60_window_fl": state("binary_sensor.xc60_window_fl", "on"),
   "button.xc60_clim_start": state("button.xc60_clim_start", "unknown"),
   "button.xc60_clim_stop": state("button.xc60_clim_stop", "unknown"),
+  "button.xc60_honk": state("button.xc60_honk", "unknown"),
+  "button.xc60_flash": state("button.xc60_flash", "unknown"),
   "button.xc60_honk_flash": state("button.xc60_honk_flash", "unknown"),
 
   "sensor.v60_fuel": state("sensor.v60_fuel", "42", { unit_of_measurement: "L" }),
@@ -167,19 +171,44 @@ cardVertical.hass = hass;
 const gridV = cardVertical.shadowRoot.querySelector(".vc-grid");
 assert("layout: vertical forces a single stacked column", gridV.style.gridTemplateColumns === "1fr");
 
-// --- Lock button test ---
-const lockBtn = vehicles[0].querySelector('[data-action="toggle-lock"]');
+// --- Lock button test: every action now needs an extra confirm tap ---
+// Each click re-renders the whole card, so re-query the DOM after every
+// click instead of reusing a stale element reference.
+let vXc60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const lockBtn = vXc60.querySelector('[data-action="arm"][data-arm="lock"]');
 assert("lock button exists for XC60", !!lockBtn);
 lockBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+assert("tapping the lock icon does NOT call any service yet — it only arms a confirm step", !serviceCalls.some((c) => c.domain === "lock"));
+vXc60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const confirmLockChip = vXc60.querySelector('[data-action="confirm-lock"]');
+assert("arming the lock action reveals a confirm chip", !!confirmLockChip);
+confirmLockChip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 const lockCall = serviceCalls.find((c) => c.domain === "lock");
-assert("clicking lock (currently locked) calls lock.unlock", lockCall && lockCall.service === "unlock" && lockCall.data.entity_id === "lock.xc60_lock");
+assert("tapping the confirm chip (currently locked) calls lock.unlock", lockCall && lockCall.service === "unlock" && lockCall.data.entity_id === "lock.xc60_lock");
 
-// --- Honk button test ---
-const honkBtn = vehicles[0].querySelector('[data-action="honk"]');
+// Tapping the same icon a second time (without confirming) collapses it again
+let vV60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+const v60LockBtn = vV60.querySelector('[data-action="arm"][data-arm="lock"]');
+v60LockBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+vV60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+assert("arming V60's lock reveals its own confirm chip", !!vV60.querySelector('[data-action="confirm-lock"]'));
+vV60.querySelector('[data-action="arm"][data-arm="lock"]').dispatchEvent(new MouseEvent("click", { bubbles: true }));
+vV60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+assert("tapping the same icon again dismisses the confirm chip without calling any service", !vV60.querySelector('[data-action="confirm-lock"]') && !serviceCalls.some((c) => c.data && c.data.entity_id === "lock.v60_lock"));
+
+// --- Honk button test: arming reveals Horn / Lights / Horn & lights choices ---
+vXc60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const honkBtn = vXc60.querySelector('[data-action="arm"][data-arm="honk"]');
 assert("honk button exists for XC60", !!honkBtn);
 honkBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+vXc60 = card.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const hornChip = vXc60.querySelector('[data-action="honk-horn"]');
+const lightsChip = vXc60.querySelector('[data-action="honk-lights"]');
+const bothChip = vXc60.querySelector('[data-action="honk-both"]');
+assert("arming honk reveals all three choices: horn, lights, horn & lights", !!hornChip && !!lightsChip && !!bothChip);
+bothChip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 const honkCall = serviceCalls.find((c) => c.domain === "button" && c.data.entity_id === "button.xc60_honk_flash");
-assert("clicking honk calls button.press on honk_flash entity", !!honkCall && honkCall.service === "press");
+assert("choosing 'Horn & lights' calls button.press on the honk_flash entity", !!honkCall && honkCall.service === "press");
 
 // --- Editor test ---------------------------------------------------
 const editor = document.createElement("volvo-cars-card-editor");
