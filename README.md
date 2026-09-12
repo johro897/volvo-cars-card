@@ -17,6 +17,8 @@ Unlike many custom cards, this one requires no external dependencies — no char
 - **Charging status** (electric/plug-in hybrid only) — status, power, time left, target level; the whole section is simply absent for a combustion-only vehicle, not just hidden
 - **Engine start/stop** (combustion/PHEV only) — same tap-to-confirm flow as the other actions
 - **Service & health** — odometer, distance/time/engine-hours to service, and a curated set of fluid and tire-pressure warnings; collapsed to a one-line summary ("All good" or an issue count), expands to full detail on tap
+- **Trip data** — trip meter and average speed for both the manual and automatic trip counters, collapsed to a one-line header by default
+- **Vehicle photo** — an optional picture shown above the name (`picture` config option)
 - **Location** — an "open in map" link from the vehicle's device tracker
 - **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window); automatically falls back between the integration's different sensor variants depending on which one your vehicle actually exposes
 - **Distance driven** — a 7-day bar chart derived from odometer history (day-over-day distance, not a fake trip list)
@@ -71,7 +73,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name) |
+| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name), `picture` (optional image URL shown above the name, e.g. `/local/xc60.jpg`) |
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
@@ -91,6 +93,8 @@ show_stats: true
 ## Not included (yet)
 
 - **An embedded map** instead of an "open in map" link — no map library is used in this project; a real embedded map would be a separate, larger decision.
+- **A real street address** instead of coordinates/"Home" — would require an external reverse-geocoding service (e.g. OpenStreetMap Nominatim), which would be this project's first dependency outside Home Assistant's own API. Not pursued without an explicit decision to accept that tradeoff.
+- **Individual window/sunroof remote control**, **exact tire pressure (PSI/kPa)**, and **charge scheduling** — none of these are exposed as controllable/available data by the Volvo integration as far as verified; not a card limitation.
 - **Trip-by-trip history** (individual trips with date/distance/route, like Volvo's own app) — deliberately not built. Home Assistant's official `Volvo` integration only exposes cumulative trip-meter and average-speed sensors, not a per-trip list; the old `volvooncall` integration that did expose trip data is deprecated and known to over-poll Volvo's API. The distance-driven trend above is the closest honest substitute.
 - Only a curated subset of the integration's warning sensors are shown (fluids, tire pressure) — the dozen individual light-bulb-failure warnings aren't included yet.
 
@@ -111,6 +115,13 @@ show_stats: true
 ---
 
 ## Changelog
+
+### 0.6.1 (2026-09-12)
+
+- Added a Trip data section (trip meter + average speed, manual and automatic)
+- Added a `picture` config option to show a photo of the vehicle
+- Charging section now also shows connection status, charging type, and current limit
+- The battery ring now draws a marker at the configured charge target level
 
 ### 0.6.0 (2026-09-12)
 
