@@ -22,6 +22,7 @@ Unlike many custom cards, this one requires no external dependencies — no char
 - **Location** — an "open in map" link from the vehicle's device tracker
 - **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window); automatically falls back between the integration's different sensor variants depending on which one your vehicle actually exposes
 - **Distance driven** — a 7-day bar chart derived from odometer history (day-over-day distance, not a fake trip list)
+- **Lease mileage budget** (optional) — set an annual km limit and your lease's start date, and the card shows how much you have left, whether you're on pace, and an annual usage chart with a projection at your current driving rate. The odometer baseline can be typed in or auto-detected from Home Assistant's own long-term statistics.
 - **Multiple vehicles** in one card, each configured independently
 - Visual (GUI) editor — no YAML required to get started
 - UI auto-translates to your Home Assistant language — English or Swedish (falls back to English)
@@ -73,7 +74,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name), `picture` (optional image URL shown above the name, e.g. `/local/xc60.jpg`) |
+| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name), `picture` (optional image URL shown above the name, e.g. `/local/xc60.jpg`), `lease_annual_limit_km` (optional, enables the Lease budget section, e.g. `20000`), `lease_start_date` (required if the limit is set, `YYYY-MM-DD` — the lease's anniversary date, recomputed every year), `lease_start_odometer_km` (optional but recommended — the odometer reading at the start of the *current* lease year; if omitted, the card tries to auto-detect it from Home Assistant's long-term statistics for the odometer sensor) |
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
@@ -113,9 +114,15 @@ show_stats: true
 
 **The vehicle icon (`icon:` config option) doesn't show up.** It's rendered with Home Assistant's own `<ha-icon>` element, which — unlike the custom `<select>` this card builds for the device picker — is not something built ourselves, so it's a (much lower-risk, but not zero-risk) assumption that it's always available. If it doesn't render, leave `icon` unset; nothing else depends on it.
 
+**The Lease budget section shows "Collecting data…" and never resolves.** This means the card couldn't establish a baseline: no `lease_start_odometer_km` was set, and no long-term statistics were found for the odometer sensor going back to your lease's anniversary date. The most common cause is that Home Assistant simply hasn't been tracking the vehicle that far back yet. Fix: set `lease_start_odometer_km` manually — it's optional but recommended anyway, since the auto-detected value is only as precise as the nearest weekly statistics point.
+
 ---
 
 ## Changelog
+
+### 0.7.0 (2026-09-13)
+
+- Added an optional **Lease mileage budget** section (closes #2): set an annual km limit and lease start date, get a countdown, a pace status, and an annual usage chart with a projection at your current rate. The odometer baseline can be entered manually or auto-detected from Home Assistant's long-term statistics.
 
 ### 0.6.2 (2026-09-12)
 
