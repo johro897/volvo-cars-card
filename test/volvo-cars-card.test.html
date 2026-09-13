@@ -37,6 +37,7 @@
 
 <script src="../volvo-cars-card.js"></script>
 <script>
+(async () => {
 const results = [];
 function assert(desc, cond) {
   results.push({ desc, pass: !!cond });
@@ -145,6 +146,7 @@ const hass = {
   language: "en",
   locale: { language: "en" },
   callApi: () => Promise.resolve([[]]), // no history in this test — exercises the "no data" sparkline path
+  callWS: () => Promise.resolve({}), // default: no statistics data (a real hass always has callWS — this mirrors that)
   callService: (domain, service, data) => {
     serviceCalls.push({ domain, service, data });
     return Promise.resolve();
@@ -252,6 +254,95 @@ const syntheticOdometerHistory = [
 const distances = card._bucketizeDailyDistance(syntheticOdometerHistory);
 assert("daily distance bucketing returns one entry per configured day", distances.length === 7);
 assert("today's distance reflects the most recent delta (1150 - 1120 = 30)", distances[distances.length - 1] === 30);
+
+// --- Lease budget: anniversary date math (pure logic) ---
+const anniv1 = card._leaseAnniversaryStart("2020-06-15", new Date(2026, 8, 13)); // lease month/day already passed this year
+assert("anniversary stays in the current year when the month/day already occurred", anniv1.getFullYear() === 2026 && anniv1.getMonth() === 5 && anniv1.getDate() === 15);
+
+const anniv2 = card._leaseAnniversaryStart("2020-12-25", new Date(2026, 8, 13)); // lease month/day hasn't occurred yet this year
+assert("anniversary rolls back to last year when the month/day hasn't happened yet this year", anniv2.getFullYear() === 2025 && anniv2.getMonth() === 11 && anniv2.getDate() === 25);
+
+assert("an invalid lease_start_date returns null instead of throwing", card._leaseAnniversaryStart("not-a-date") === null);
+
+// --- Lease budget: pace/projection math (pure logic, manual baseline, fixed synthetic "now") ---
+const leaseNow = new Date(2026, 8, 13); // Sept 13 2026 — matches Jan 1 anniversary at ~255 days elapsed
+const dXc60 = card._discoverVehicle("dev_xc60");
+
+const underPaceVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 10000 };
+const underLease = card._computeLease(underPaceVehicle, dXc60, hass, leaseNow);
+assert("lease computes 'ok' status when configured with a manual baseline and a live odometer reading", underLease.status === "ok");
+assert("daysElapsed + daysLeft always equals daysInYear", underLease.daysElapsed + underLease.daysLeft === underLease.daysInYear);
+assert("2026 is not a leap year, so the lease year is 365 days", underLease.daysInYear === 365);
+assert("daysElapsed lands in the expected ~255-day window for a Jan 1 anniversary observed on Sept 13", underLease.daysElapsed > 250 && underLease.daysElapsed < 260);
+assert("used = current odometer (18420) minus manual baseline (10000)", underLease.used === 8420);
+assert("remaining = limit minus used (20000 - 8420)", Math.round(underLease.remaining) === 11580);
+assert("driving far less than 8420km by day 255 of 365 is classified as under pace", underLease.paceStatus === "under" && underLease.overPaceKm < 0);
+assert("projected year-end total at this (slow) rate stays under the annual limit", underLease.projectedTotal < underLease.limit);
+
+const overPaceVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 };
+const overLease = card._computeLease(overPaceVehicle, dXc60, hass, leaseNow);
+assert("used = 18420 - 2000 = 16420", overLease.used === 16420);
+assert("driving 16420km by day 255 of 365 (well above the ~14000km expected pace) is classified as over pace", overLease.paceStatus === "over" && overLease.overPaceKm > 0);
+assert("16420 used is still under the 20000 annual limit, so overLimit is false", overLease.overLimit === false);
+
+const overLimitVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 15000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 };
+const overLimitLease = card._computeLease(overLimitVehicle, dXc60, hass, leaseNow);
+assert("used (16420) exceeding a 15000 annual limit is classified as overLimit", overLimitLease.overLimit === true);
+assert("remaining goes negative once the annual limit is actually exceeded", Math.round(overLimitLease.remaining) === -1420);
+
+const noConfigLease = card._computeLease({ device_id: "dev_xc60" }, dXc60, hass, leaseNow);
+assert("a vehicle with no lease config returns null (feature not enabled for that vehicle)", noConfigLease === null);
+
+// --- Lease budget: rendered section (manual baseline, real "now" — end-to-end wiring) ---
+const cardLease = document.createElement("volvo-cars-card");
+stage.appendChild(cardLease);
+cardLease.setConfig({
+  vehicles: [
+    { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 },
+    { device_id: "dev_v60" },
+  ],
+});
+cardLease.hass = hass;
+const vLeaseXc60 = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const vLeaseV60 = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[1];
+const leaseToggle = Array.from(vLeaseXc60.querySelectorAll('[data-action="toggle-section"]')).find((el) => el.dataset.section === "lease");
+assert("XC60 (configured with lease fields) shows a Lease budget section", !!leaseToggle);
+assert("V60 (no lease config) shows NO Lease budget section", !Array.from(vLeaseV60.querySelectorAll('[data-action="toggle-section"]')).some((el) => el.dataset.section === "lease"));
+assert("collapsed summary shows an over-pace warning for this scenario (16420 used, low baseline)", leaseToggle.innerHTML.includes("over pace"));
+assert("chart/detail is not shown while collapsed", !vLeaseXc60.innerHTML.includes("km left this year"));
+leaseToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+const vLeaseXc60Expanded = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+assert("expanding reveals the 'km left this year' stat", vLeaseXc60Expanded.innerHTML.includes("km left this year"));
+assert("expanding reveals the annual usage chart with the configured target", vLeaseXc60Expanded.innerHTML.includes("Target 20000 km"));
+assert("expanding reveals the manual baseline note", vLeaseXc60Expanded.innerHTML.includes("manually entered"));
+
+// --- Lease budget: auto-detected baseline via mocked recorder statistics ---
+const wsCalls = [];
+const hassWithWs = {
+  ...hass,
+  callWS: (msg) => {
+    wsCalls.push(msg);
+    return Promise.resolve({
+      "sensor.xc60_odometer": [
+        { start: Date.parse("2026-01-01T00:00:00"), state: 5000 },
+        { start: Date.parse("2026-03-01T00:00:00"), state: 8000 },
+      ],
+    });
+  },
+};
+const cardAutoLease = document.createElement("volvo-cars-card");
+stage.appendChild(cardAutoLease);
+cardAutoLease.setConfig({
+  vehicles: [{ device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01" }],
+});
+cardAutoLease.hass = hassWithWs;
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert("configuring lease fields without a manual baseline triggers a recorder/statistics_during_period call", wsCalls.some((m) => m.type === "recorder/statistics_during_period" && m.statistic_ids[0] === "sensor.xc60_odometer"));
+const vAutoXc60 = cardAutoLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const autoLeaseToggle = Array.from(vAutoXc60.querySelectorAll('[data-action="toggle-section"]')).find((el) => el.dataset.section === "lease");
+autoLeaseToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+const vAutoXc60Expanded = cardAutoLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+assert("with no manual baseline, the auto-detected note is shown instead", vAutoXc60Expanded.innerHTML.includes("auto-detected"));
 
 // --- Title option test (regression: the header used to be a hardcoded,
 // untranslatable-by-config "Volvo Cars" with no way to customize or hide it) ---
@@ -399,6 +490,7 @@ summary.textContent = failCount === 0
   : `${failCount} of ${results.length} checks FAILED`;
 summary.style.background = failCount === 0 ? "#1b3a1f" : "#3a1b1b";
 summary.style.color = failCount === 0 ? "#4caf50" : "#ef5350";
+})();
 </script>
 </body>
 </html>

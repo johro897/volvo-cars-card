@@ -55,6 +55,26 @@
       days_unit: "days",
       hours_unit: "hours",
       distance_trend: "Distance driven · last {days}d",
+      lease_budget: "Lease budget",
+      lease_waiting: "Collecting data…",
+      lease_over_limit: "{km} km over the limit",
+      lease_over_pace: "{km} km over pace",
+      lease_under_pace: "{km} km under pace",
+      lease_on_pace: "On pace",
+      lease_km_left: "km left this year",
+      lease_days_left: "days left in lease year",
+      lease_chart_title: "Annual usage vs. budget",
+      lease_target: "Target {km} km",
+      lease_projection: "~{km} km at this rate",
+      lease_start_label: "Start",
+      lease_today_label: "Today",
+      lease_end_label: "End",
+      lease_legend: "Solid = driven · dashed grey = budget pace · dashed amber = projection at current rate",
+      lease_baseline_auto: "Baseline: auto-detected from history",
+      lease_baseline_manual: "Baseline: {km} km · manually entered",
+      editor_lease_limit: "Annual lease limit (km, optional)",
+      editor_lease_start_date: "Lease start date (YYYY-MM-DD, optional)",
+      editor_lease_start_odometer: "Odometer at lease start (km, optional — recommended)",
       brake_fluid_level_warning: "Brake fluid low",
       coolant_level_warning: "Coolant level low",
       oil_level_warning: "Oil level warning",
@@ -144,6 +164,26 @@
       days_unit: "dagar",
       hours_unit: "timmar",
       distance_trend: "Körd sträcka · senaste {days}d",
+      lease_budget: "Leasingbudget",
+      lease_waiting: "Samlar data…",
+      lease_over_limit: "{km} km över gränsen",
+      lease_over_pace: "{km} km över takt",
+      lease_under_pace: "{km} km under takt",
+      lease_on_pace: "I takt",
+      lease_km_left: "km kvar i år",
+      lease_days_left: "dagar kvar av leasingår",
+      lease_chart_title: "Årsförbrukning vs. budget",
+      lease_target: "Mål {km} km",
+      lease_projection: "~{km} km i denna takt",
+      lease_start_label: "Start",
+      lease_today_label: "Idag",
+      lease_end_label: "Slut",
+      lease_legend: "Heldragen = körd sträcka · streckad grå = budgettakt · streckad amber = prognos vid nuvarande takt",
+      lease_baseline_auto: "Baslinje: automatiskt hittad från historik",
+      lease_baseline_manual: "Baslinje: {km} km · manuellt angiven",
+      editor_lease_limit: "Årlig leasinggräns (km, valfritt)",
+      editor_lease_start_date: "Leasingårets startdatum (ÅÅÅÅ-MM-DD, valfritt)",
+      editor_lease_start_odometer: "Mätarställning vid leasingstart (km, valfritt — rekommenderas)",
       brake_fluid_level_warning: "Bromsvätska låg",
       coolant_level_warning: "Kylarvätska låg",
       oil_level_warning: "Oljenivåvarning",
@@ -263,6 +303,8 @@
   const ENERGY_STAT_KEYS = ["average_energy_consumption", "average_energy_consumption_automatic", "average_energy_consumption_charge"];
   const FUEL_STAT_KEYS = ["average_fuel_consumption", "average_fuel_consumption_automatic"];
   const ODOMETER_DAYS = 7;
+  const DAY_MS = 24 * 3600 * 1000;
+  const LEASE_PACE_TOLERANCE = 0.03; // ±3% of the annual limit counts as "on pace"
 
   const SENSOR_KEY_SET = new Set(SENSOR_KEYS);
   const DOOR_WINDOW_KEY_SET = new Set(DOOR_WINDOW_KEYS);
@@ -314,6 +356,7 @@
       this._armed = new Map(); // deviceId -> "lock" | "climate" | "honk" | "engine" | undefined
       this._armTimers = new Map(); // deviceId -> setTimeout id, auto-dismisses an armed action
       this._expanded = new Map(); // "deviceId:section" -> boolean (service/trip expandable sections)
+      this._leaseStats = new Map(); // deviceId -> { points, fetchedAt, fetching } (recorder/statistics_during_period)
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
     }
 
@@ -346,6 +389,16 @@
           name: v.name || "",
           icon: v.icon || "",
           picture: v.picture || "",
+          // Lease mileage budget (issue #2) — all optional; the section is
+          // only shown when both lease_annual_limit_km and lease_start_date
+          // are set. lease_start_odometer_km is an optional-but-recommended
+          // manual baseline; when omitted the card tries to auto-detect it
+          // from HA's long-term statistics for the odometer sensor.
+          lease_annual_limit_km: v.lease_annual_limit_km ? Math.max(1, parseFloat(v.lease_annual_limit_km)) : null,
+          lease_start_date: v.lease_start_date || "",
+          lease_start_odometer_km: v.lease_start_odometer_km !== undefined && v.lease_start_odometer_km !== null && v.lease_start_odometer_km !== ""
+            ? parseFloat(v.lease_start_odometer_km)
+            : null,
         })),
       };
       if (this._hass) this._render();
@@ -580,6 +633,11 @@
           this._maybeRefreshOdometerHistory(v.device_id);
         }
       }
+      for (const v of this._config.vehicles) {
+        if (v.lease_annual_limit_km && v.lease_start_date) {
+          this._maybeRefreshLeaseStats(v);
+        }
+      }
     }
 
     _renderVehicle(vehicle, hass) {
@@ -725,6 +783,7 @@
       const positionHtml = this._renderPosition(d, hass);
       const statsHtml = this._config.show_stats ? this._renderStats(vehicle, d, hass, isEv) : "";
       const distanceTrendHtml = this._config.show_stats ? this._renderDistanceTrend(vehicle, d, hass) : "";
+      const leaseHtml = this._renderLeaseBudget(vehicle, d, hass);
       const iconHtml = vehicle.icon
         ? `<ha-icon icon="${escHtml(vehicle.icon)}" style="color:var(--primary-text-color); --mdc-icon-size:18px;"></ha-icon>`
         : "";
@@ -752,6 +811,7 @@
           ${positionHtml}
           ${statsHtml}
           ${distanceTrendHtml}
+          ${leaseHtml}
         </div>`;
     }
 
@@ -965,6 +1025,100 @@
       return `<svg viewBox="0 0 160 44" width="100%" height="40" preserveAspectRatio="none" class="vc-spark">${bars}</svg>`;
     }
 
+    _renderLeaseBudget(vehicle, d, hass) {
+      if (!vehicle.lease_annual_limit_km || !vehicle.lease_start_date) return "";
+      const lease = this._computeLease(vehicle, d, hass);
+      if (!lease) return "";
+      const deviceId = vehicle.device_id;
+      const dev = escHtml(deviceId);
+      const expanded = !!this._expanded.get(`${deviceId}:lease`);
+
+      let summaryHtml;
+      if (lease.status !== "ok") {
+        summaryHtml = `<span class="vc-expand-summary" style="color:var(--secondary-text-color);">${escHtml(t(hass, "lease_waiting"))}</span>`;
+      } else if (lease.overLimit) {
+        summaryHtml = `<span class="vc-expand-summary" style="color:var(--error-color);">${escHtml(t(hass, "lease_over_limit", { km: Math.round(lease.used - lease.limit) }))}</span>`;
+      } else if (lease.paceStatus === "over") {
+        summaryHtml = `<span class="vc-expand-summary" style="color:var(--warning-color);">${escHtml(t(hass, "lease_over_pace", { km: Math.round(lease.overPaceKm) }))}</span>`;
+      } else if (lease.paceStatus === "under") {
+        summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_under_pace", { km: Math.round(-lease.overPaceKm) }))}</span>`;
+      } else {
+        summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_on_pace"))}</span>`;
+      }
+
+      let detailHtml = "";
+      if (expanded && lease.status === "ok") {
+        const baselineNote = lease.baselineSource === "manual"
+          ? t(hass, "lease_baseline_manual", { km: Math.round(lease.baselineValue) })
+          : t(hass, "lease_baseline_auto");
+        detailHtml = `
+          <div style="display:flex; gap:20px; margin-top:10px;">
+            <div>
+              <div style="font-size:20px; font-weight:800; color:var(--primary-text-color); line-height:1;">${escHtml(Math.round(lease.remaining))} km</div>
+              <div style="font-size:11px; color:var(--secondary-text-color); margin-top:3px;">${escHtml(t(hass, "lease_km_left"))}</div>
+            </div>
+            <div>
+              <div style="font-size:20px; font-weight:800; color:var(--primary-text-color); line-height:1;">${escHtml(lease.daysLeft)}</div>
+              <div style="font-size:11px; color:var(--secondary-text-color); margin-top:3px;">${escHtml(t(hass, "lease_days_left"))}</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;">
+            <div class="vc-section-title" style="margin-bottom:6px;">${escHtml(t(hass, "lease_chart_title"))}</div>
+            ${this._renderLeaseChart(lease, hass)}
+            <div style="font-size:10px; color:var(--secondary-text-color); margin-top:2px;">${escHtml(t(hass, "lease_legend"))}</div>
+          </div>
+          <div style="font-size:10.5px; color:var(--secondary-text-color); margin-top:10px;">${escHtml(baselineNote)}</div>
+        `;
+      } else if (expanded) {
+        detailHtml = `<div style="margin-top:10px; font-size:12px; color:var(--secondary-text-color);">${escHtml(t(hass, "lease_waiting"))}</div>`;
+      }
+
+      return `
+        <div class="vc-section">
+          <button class="vc-expand-toggle" data-action="toggle-section" data-section="lease" data-device="${dev}">
+            <span class="vc-section-title">${escHtml(t(hass, "lease_budget"))}</span>
+            ${summaryHtml}
+            <span class="vc-chevron" style="transform:rotate(${expanded ? 180 : 0}deg);">${this._iconChevron("var(--secondary-text-color)")}</span>
+          </button>
+          ${detailHtml}
+        </div>`;
+    }
+
+    _renderLeaseChart(lease, hass) {
+      const axisMax = Math.max(lease.limit, lease.projectedTotal, 1) * 1.1;
+      const startMs = lease.anniversaryStart.getTime();
+      const spanMs = lease.daysInYear * DAY_MS;
+      const xAt = (t) => 10 + Math.max(0, Math.min(1, (t - startMs) / spanMs)) * 180;
+      const yAt = (km) => 60 - (Math.max(0, km) / axisMax) * 50;
+
+      const linePoints = [{ t: startMs, used: 0 }, ...lease.chartPoints];
+      const pathStr = linePoints.map((p) => `${xAt(p.t).toFixed(1)},${yAt(p.used).toFixed(1)}`).join(" ");
+
+      const todayX = xAt(Date.now());
+      const todayY = yAt(lease.used);
+      const budgetEndY = yAt(lease.limit);
+      const projEndY = yAt(lease.projectedTotal);
+
+      return `
+        <svg viewBox="0 0 200 76" width="100%" height="68" style="display:block;">
+          <line x1="10" y1="60" x2="190" y2="60" stroke="var(--divider-color)" stroke-width="1"/>
+          <line x1="${todayX.toFixed(1)}" y1="10" x2="${todayX.toFixed(1)}" y2="60" stroke="var(--secondary-text-color)" stroke-width="1" stroke-dasharray="2,3" opacity="0.5"/>
+
+          <line x1="10" y1="60" x2="190" y2="${budgetEndY.toFixed(1)}" stroke="var(--secondary-text-color)" stroke-width="1.3" stroke-dasharray="4,3" opacity="0.8"/>
+          <text x="188" y="${Math.max(8, budgetEndY - 3).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_target", { km: Math.round(lease.limit) }))}</text>
+
+          <line x1="${todayX.toFixed(1)}" y1="${todayY.toFixed(1)}" x2="190" y2="${projEndY.toFixed(1)}" stroke="var(--warning-color)" stroke-width="1.6" stroke-dasharray="3,3"/>
+          <text x="188" y="${Math.max(8, projEndY - 3).toFixed(1)}" font-size="6.5" fill="var(--warning-color)" text-anchor="end">${escHtml(t(hass, "lease_projection", { km: Math.round(lease.projectedTotal) }))}</text>
+
+          <polyline points="${pathStr}" fill="none" stroke="var(--info-color, var(--primary-color))" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="${todayX.toFixed(1)}" cy="${todayY.toFixed(1)}" r="2.8" fill="var(--info-color, var(--primary-color))"/>
+
+          <text x="10" y="70" font-size="7" fill="var(--secondary-text-color)" text-anchor="start">${escHtml(t(hass, "lease_start_label"))}</text>
+          <text x="${todayX.toFixed(1)}" y="70" font-size="7" fill="var(--primary-text-color)" font-weight="700" text-anchor="middle">${escHtml(t(hass, "lease_today_label"))}</text>
+          <text x="190" y="70" font-size="7" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_end_label"))}</text>
+        </svg>`;
+    }
+
     _renderPosition(d, hass) {
       if (!d.tracker) return "";
       const st = hass.states[d.tracker];
@@ -1124,6 +1278,128 @@
         distances.push(prev !== null && cur !== null ? Math.max(0, cur - prev) : null);
       }
       return distances;
+    }
+
+    // The most recent occurrence of lease_start_date's month/day that is
+    // on or before `now` — a lease renews annually, so year 2+ needs the
+    // CURRENT year's anniversary, not the original signing date.
+    _leaseAnniversaryStart(dateStr, now = new Date()) {
+      const parsed = new Date(dateStr + "T00:00:00");
+      if (isNaN(parsed.getTime())) return null;
+      const anniv = new Date(now.getFullYear(), parsed.getMonth(), parsed.getDate());
+      if (anniv.getTime() > now.getTime()) anniv.setFullYear(anniv.getFullYear() - 1);
+      return anniv;
+    }
+
+    _maybeRefreshLeaseStats(vehicle) {
+      const deviceId = vehicle.device_id;
+      const cached = this._leaseStats.get(deviceId);
+      const now = Date.now();
+      if (cached?.fetching) return;
+      if (cached?.fetchedAt && now - cached.fetchedAt < HISTORY_MIN_REFRESH_MS) return;
+      const d = this._discoverVehicle(deviceId);
+      const entityId = d.sensors.odometer;
+      if (!entityId || !this._hass) return;
+
+      const anniversaryStart = this._leaseAnniversaryStart(vehicle.lease_start_date, new Date());
+      if (!anniversaryStart) return;
+
+      this._leaseStats.set(deviceId, { ...(cached || {}), fetching: true, fetchedAt: now });
+
+      // callWS is a real, always-present method on a live HA `hass` object,
+      // but guard with try/catch anyway (never trust an external call not
+      // to throw synchronously) — same "never throw unhandled" discipline
+      // as every other fetch in this file.
+      try {
+        Promise.resolve(
+          this._hass.callWS({
+            type: "recorder/statistics_during_period",
+            statistic_ids: [entityId],
+            start_time: anniversaryStart.toISOString(),
+            end_time: new Date().toISOString(),
+            period: "week",
+          })
+        )
+          .then((resp) => {
+            const points = (resp?.[entityId] || [])
+              .map((p) => ({ t: p.start, v: p.state ?? p.sum }))
+              .filter((p) => Number.isFinite(p.t) && typeof p.v === "number" && !isNaN(p.v))
+              .sort((a, b) => a.t - b.t);
+            this._leaseStats.set(deviceId, { points, fetchedAt: Date.now(), fetching: false });
+            this._render();
+          })
+          .catch((err) => {
+            console.warn("volvo-cars-card: lease statistics fetch failed", err);
+            this._leaseStats.set(deviceId, { points: [], fetchedAt: Date.now(), fetching: false });
+          });
+      } catch (err) {
+        console.warn("volvo-cars-card: lease statistics fetch failed", err);
+        this._leaseStats.set(deviceId, { points: [], fetchedAt: Date.now(), fetching: false });
+      }
+    }
+
+    // Returns null when the feature isn't configured/ready, or a full
+    // computed snapshot (numbers + chart points) otherwise. Kept as one
+    // pure-ish function (only reads hass/state) so it can be unit-tested
+    // directly with synthetic input.
+    _computeLease(vehicle, d, hass, now = new Date()) {
+      if (!vehicle.lease_annual_limit_km || !vehicle.lease_start_date) return null;
+      const odometerId = d.sensors.odometer;
+      const odometerState = odometerId ? hass.states[odometerId] : undefined;
+      if (!odometerState || isNaN(parseFloat(odometerState.state))) return { status: "waiting" };
+      const currentOdometer = parseFloat(odometerState.state);
+
+      const anniversaryStart = this._leaseAnniversaryStart(vehicle.lease_start_date, now);
+      if (!anniversaryStart) return null;
+      const anniversaryEnd = new Date(anniversaryStart);
+      anniversaryEnd.setFullYear(anniversaryEnd.getFullYear() + 1);
+      const daysInYear = Math.round((anniversaryEnd.getTime() - anniversaryStart.getTime()) / DAY_MS);
+      const daysElapsed = Math.max(0, Math.min(daysInYear, Math.floor((now.getTime() - anniversaryStart.getTime()) / DAY_MS)));
+      const daysLeft = daysInYear - daysElapsed;
+
+      const stats = this._leaseStats.get(vehicle.device_id);
+      const points = stats?.points || [];
+      let baselineValue = null;
+      let baselineSource = null;
+      if (vehicle.lease_start_odometer_km !== null && !isNaN(vehicle.lease_start_odometer_km)) {
+        baselineValue = vehicle.lease_start_odometer_km;
+        baselineSource = "manual";
+      } else if (points.length > 0) {
+        baselineValue = points[0].v;
+        baselineSource = "auto";
+      }
+      if (baselineValue === null) {
+        return { status: stats?.fetching || !stats ? "waiting" : "no_baseline" };
+      }
+
+      const limit = vehicle.lease_annual_limit_km;
+      const used = Math.max(0, currentOdometer - baselineValue);
+      const remaining = limit - used;
+      const expectedUsed = (daysElapsed / daysInYear) * limit;
+      const overPaceKm = used - expectedUsed;
+      const tolerance = limit * LEASE_PACE_TOLERANCE;
+      const paceStatus = overPaceKm > tolerance ? "over" : overPaceKm < -tolerance ? "under" : "on";
+      const overLimit = used > limit;
+
+      // Chart points: cumulative km used since the anniversary, at each
+      // fetched statistics timestamp, plus today's live reading as the
+      // final point (statistics lag behind the live state by design).
+      const chartPoints = points
+        .map((p) => ({ t: p.t, used: Math.max(0, p.v - baselineValue) }))
+        .filter((p) => p.t >= anniversaryStart.getTime());
+      chartPoints.push({ t: now.getTime(), used });
+
+      const projectedTotal = daysElapsed > 0 ? used * (daysInYear / daysElapsed) : used;
+
+      return {
+        status: "ok",
+        baselineValue, baselineSource,
+        limit, used, remaining, overLimit,
+        daysInYear, daysElapsed, daysLeft,
+        expectedUsed, overPaceKm, paceStatus,
+        anniversaryStart, anniversaryEnd,
+        chartPoints, projectedTotal,
+      };
     }
 
     _bucketize(raw, startMs, endMs) {
@@ -1311,6 +1587,9 @@
           name: v.name || "",
           icon: v.icon || "",
           picture: v.picture || "",
+          lease_annual_limit_km: v.lease_annual_limit_km ?? "",
+          lease_start_date: v.lease_start_date || "",
+          lease_start_odometer_km: v.lease_start_odometer_km ?? "",
         })),
       };
       this._render();
@@ -1408,6 +1687,13 @@
           </div>
           <div class="ed-row">
             <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "editor_picture"))}" data-idx="${idx}" data-field="picture" value="${escHtml(v.picture)}" />
+          </div>
+          <div class="ed-row">
+            <input class="ed-input" type="number" min="1" placeholder="${escHtml(t(hass, "editor_lease_limit"))}" data-idx="${idx}" data-field="lease_annual_limit_km" value="${escHtml(v.lease_annual_limit_km)}" />
+            <input class="ed-input" type="text" placeholder="${escHtml(t(hass, "editor_lease_start_date"))}" data-idx="${idx}" data-field="lease_start_date" value="${escHtml(v.lease_start_date)}" />
+          </div>
+          <div class="ed-row">
+            <input class="ed-input" type="number" min="0" placeholder="${escHtml(t(hass, "editor_lease_start_odometer"))}" data-idx="${idx}" data-field="lease_start_odometer_km" value="${escHtml(v.lease_start_odometer_km)}" />
           </div>
         </div>`).join("");
 
