@@ -120,6 +120,12 @@ show_stats: true
 
 ## Changelog
 
+### 0.8.0 (2026-09-13)
+
+- All four charts (consumption sparkline, Distance driven bars, Lease budget's annual usage chart, and its "Last 7 days" bars) now stretch to the card's full width instead of being squeezed into a narrow, centered strip — the two lease charts were missing `preserveAspectRatio="none"` entirely (closes #6), unlike the other two charts which already had it (but had no labels — see below).
+- Added real axis values to the consumption sparkline and Distance driven bars: a y-axis min/max (or scale) label and, respectively, start/end date labels or a weekday label per bar — previously these two charts were just a bare trend shape with no way to read an actual number off them (closes #1).
+- All chart text (axis values, weekday/date labels, budget/projection annotations) is now plain HTML positioned around/over the chart instead of inline SVG `<text>` — necessary once the charts stretch non-uniformly to fill the full width, since SVG text (and the old circle "today" marker, now a short line) would otherwise visibly distort under that stretch.
+
 ### 0.7.1 (2026-09-13)
 
 - Fixed a real gap in the Lease budget section: the daily distance chart ("Last 7 days") shown in the reviewed design was missing from the actual `0.7.0` release — only the separate, pre-existing Distance driven section existed. Added a dedicated 7-day bar chart, colored per day against the lease's own daily budget (annual limit ÷ 365), so it's visible whenever a vehicle has lease tracking configured, even with `show_stats: false`.

@@ -336,6 +336,30 @@ const barColors = Array.from(leaseRects).map((r) => r.getAttribute("fill"));
 assert("bars over the daily budget (60,80,70) are colored with the warning token", barColors.filter((c) => c === "var(--warning-color)").length === 3);
 assert("bars under the daily budget (30,40,20,50) are colored with the success token", barColors.filter((c) => c === "var(--success-color)").length === 4);
 
+// --- #1/#6: charts fill the card's full width and show real axis values,
+// not just a bare trend shape squeezed into part of the card (the two
+// lease charts previously had labels but no full-width stretch; the
+// consumption sparkline and Distance driven bars had neither). ---
+assert("lease daily-bars SVG stretches to the card's full width (preserveAspectRatio=none)", leaseSectionEl.innerHTML.includes('preserveAspectRatio="none"'));
+assert("lease daily-bars shows a y-axis scale label (0-max km, from the same seeded data as the daily budget check above)", leaseSectionEl.querySelector(".vc-chart-yaxis")?.textContent.includes("92 km"));
+assert("lease daily-bars renders one weekday label per bar", leaseSectionEl.querySelector(".vc-chart-daylabels")?.children.length === 7);
+
+const distanceTitle = Array.from(vLeaseXc60WithBars.querySelectorAll(".vc-section-title")).find((el) => el.textContent.includes("Distance driven"));
+const distanceSectionEl = distanceTitle.closest(".vc-section");
+assert("general Distance driven chart (same odometer history, different section) also stretches full width", distanceSectionEl.innerHTML.includes('preserveAspectRatio="none"'));
+assert("general Distance driven chart shows a y-axis scale label", distanceSectionEl.querySelector(".vc-chart-yaxis")?.textContent.includes("92 km"));
+assert("general Distance driven chart renders one weekday label per bar", distanceSectionEl.querySelector(".vc-chart-daylabels")?.children.length === 7);
+
+cardLease._history.set("dev_xc60", { values: [15, 17, 16, 19, 18], fetchedAt: Date.now(), fetching: false });
+cardLease._render();
+const vLeaseXc60WithHistory = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+const statsTitle = Array.from(vLeaseXc60WithHistory.querySelectorAll(".vc-section-title")).find((el) => el.textContent.includes("Avg"));
+const statsSectionEl = statsTitle.closest(".vc-section");
+assert("consumption sparkline also stretches full width", statsSectionEl.innerHTML.includes('preserveAspectRatio="none"'));
+assert("consumption sparkline shows a y-axis max value label (19 kWh/100km)", statsSectionEl.innerHTML.includes("19 kWh/100km"));
+assert("consumption sparkline shows a y-axis min value label (0 kWh/100km — the axis floor is always 0, per the pre-existing Math.min(...values, 0))", statsSectionEl.innerHTML.includes("0 kWh/100km"));
+assert("consumption sparkline shows start/end date labels, not just a bare trend shape", statsSectionEl.querySelectorAll(".vc-chart-label").length >= 4);
+
 // --- Lease budget: auto-detected baseline via mocked recorder statistics ---
 const wsCalls = [];
 const hassWithWs = {

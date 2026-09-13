@@ -1012,26 +1012,50 @@
       return `
         <div class="vc-section">
           <div class="vc-section-title">${escHtml(t(hass, "distance_trend", { days: ODOMETER_DAYS }))}</div>
-          ${this._renderDistanceBars(distances)}
+          ${this._renderDistanceBars(distances, hass)}
         </div>`;
     }
 
-    _renderDistanceBars(distances) {
+    // Full-width, non-uniformly-scaled SVG (preserveAspectRatio="none") for
+    // the bars themselves — safe because rects tolerate stretching with no
+    // visual distortion. All text (axis scale, weekday labels) is rendered
+    // as plain HTML around the SVG instead of inline <text>, since text
+    // *would* visibly stretch under a "none" transform. See #1/#6.
+    _renderDistanceBars(distances, hass) {
       if (!distances.length || distances.every((v) => v === null)) {
-        return `<svg viewBox="0 0 160 44" width="100%" height="40" class="vc-spark"></svg>`;
+        return `<div class="vc-chart-wrap" style="height:64px;"><svg viewBox="0 0 100 100" width="100%" height="100%" class="vc-spark"></svg></div>`;
       }
       const max = Math.max(...distances.filter((v) => v !== null), 1);
+      const axisMax = max * 1.15;
       const n = distances.length;
-      const gap = 160 / n;
-      const barW = gap * 0.55;
+      const plotLeft = 1, plotRight = 99, plotBottom = 96, plotTop = 4;
+      const gap = (plotRight - plotLeft) / n;
+      const barW = gap * 0.6;
+      const yAt = (v) => plotBottom - (Math.max(0, v) / axisMax) * (plotBottom - plotTop);
+
+      const now = new Date();
+      const dayLabel = (i) => {
+        const dt = new Date(now);
+        dt.setHours(0, 0, 0, 0);
+        dt.setDate(dt.getDate() - (n - 1 - i));
+        return dt.toLocaleDateString(lang(hass), { weekday: "short" });
+      };
+
       const bars = distances.map((v, i) => {
         if (v === null) return "";
-        const x = i * gap + (gap - barW) / 2;
-        const h = Math.max(2, (v / max) * 34);
-        const y = 38 - h;
-        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="var(--info-color, var(--primary-color))"/>`;
+        const x = plotLeft + i * gap + (gap - barW) / 2;
+        const y = yAt(v);
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="var(--info-color, var(--primary-color))"/>`;
       }).join("");
-      return `<svg viewBox="0 0 160 44" width="100%" height="40" preserveAspectRatio="none" class="vc-spark">${bars}</svg>`;
+
+      const dayLabels = distances.map((_, i) => `<span>${escHtml(dayLabel(i))}</span>`).join("");
+
+      return `
+        <div class="vc-chart-yaxis"><span>0–${Math.round(axisMax)} km</span></div>
+        <div class="vc-chart-wrap" style="height:64px;">
+          <svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="none" style="display:block;">${bars}</svg>
+        </div>
+        <div class="vc-chart-daylabels">${dayLabels}</div>`;
     }
 
     _renderLeaseBudget(vehicle, d, hass) {
@@ -1097,60 +1121,72 @@
         </div>`;
     }
 
+    // Full-width, non-uniformly-scaled SVG (preserveAspectRatio="none",
+    // viewBox 0-100 on both axes so SVG units double as CSS percentages)
+    // for the plotted lines only — a stretched line is still a trend line,
+    // no visual harm. All labels are plain absolutely-positioned HTML
+    // spans layered over the chart instead, since text (and the old
+    // <circle> "today" marker) *would* visibly distort under a "none"
+    // transform — replaced the circle with a short line for that reason.
+    // stroke-width uses vector-effect="non-scaling-stroke" so line
+    // thickness stays a fixed screen size regardless of the card's actual
+    // rendered width/height. See #1/#6.
     _renderLeaseChart(lease, hass) {
       const axisMax = Math.max(lease.limit, lease.projectedTotal, 1) * 1.1;
       const startMs = lease.anniversaryStart.getTime();
       const spanMs = lease.daysInYear * DAY_MS;
-      const xAt = (t) => 10 + Math.max(0, Math.min(1, (t - startMs) / spanMs)) * 180;
-      const yAt = (km) => 60 - (Math.max(0, km) / axisMax) * 50;
+      const plotLeft = 1, plotRight = 99, plotTop = 6, plotBottom = 82;
+      const xAt = (ms) => plotLeft + Math.max(0, Math.min(1, (ms - startMs) / spanMs)) * (plotRight - plotLeft);
+      const yAt = (km) => plotBottom - (Math.max(0, km) / axisMax) * (plotBottom - plotTop);
 
       const linePoints = [{ t: startMs, used: 0 }, ...lease.chartPoints];
       const pathStr = linePoints.map((p) => `${xAt(p.t).toFixed(1)},${yAt(p.used).toFixed(1)}`).join(" ");
 
       const todayX = xAt(Date.now());
       const todayY = yAt(lease.used);
-      const budgetEndY = yAt(lease.limit);
-      const projEndY = yAt(lease.projectedTotal);
+      const budgetY = yAt(lease.limit);
+      const projY = yAt(lease.projectedTotal);
 
-      return `
-        <svg viewBox="0 0 200 76" width="100%" height="68" style="display:block;">
-          <line x1="10" y1="60" x2="190" y2="60" stroke="var(--divider-color)" stroke-width="1"/>
-          <line x1="${todayX.toFixed(1)}" y1="10" x2="${todayX.toFixed(1)}" y2="60" stroke="var(--secondary-text-color)" stroke-width="1" stroke-dasharray="2,3" opacity="0.5"/>
-
-          <line x1="10" y1="60" x2="190" y2="${budgetEndY.toFixed(1)}" stroke="var(--secondary-text-color)" stroke-width="1.3" stroke-dasharray="4,3" opacity="0.8"/>
-          <text x="188" y="${Math.max(8, budgetEndY - 3).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_target", { km: Math.round(lease.limit) }))}</text>
-
-          <line x1="${todayX.toFixed(1)}" y1="${todayY.toFixed(1)}" x2="190" y2="${projEndY.toFixed(1)}" stroke="var(--warning-color)" stroke-width="1.6" stroke-dasharray="3,3"/>
-          <text x="188" y="${Math.max(8, projEndY - 3).toFixed(1)}" font-size="6.5" fill="var(--warning-color)" text-anchor="end">${escHtml(t(hass, "lease_projection", { km: Math.round(lease.projectedTotal) }))}</text>
-
-          <polyline points="${pathStr}" fill="none" stroke="var(--info-color, var(--primary-color))" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="${todayX.toFixed(1)}" cy="${todayY.toFixed(1)}" r="2.8" fill="var(--info-color, var(--primary-color))"/>
-
-          <text x="10" y="70" font-size="7" fill="var(--secondary-text-color)" text-anchor="start">${escHtml(t(hass, "lease_start_label"))}</text>
-          <text x="${todayX.toFixed(1)}" y="70" font-size="7" fill="var(--primary-text-color)" font-weight="700" text-anchor="middle">${escHtml(t(hass, "lease_today_label"))}</text>
-          <text x="190" y="70" font-size="7" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_end_label"))}</text>
+      const svg = `
+        <svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="none" style="display:block;">
+          <line x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${plotBottom}" stroke="var(--divider-color)" stroke-width="1" vector-effect="non-scaling-stroke"/>
+          <line x1="${todayX.toFixed(1)}" y1="${plotTop}" x2="${todayX.toFixed(1)}" y2="${plotBottom}" stroke="var(--secondary-text-color)" stroke-width="1" stroke-dasharray="2,3" opacity="0.5" vector-effect="non-scaling-stroke"/>
+          <line x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${budgetY.toFixed(1)}" stroke="var(--secondary-text-color)" stroke-width="1.3" stroke-dasharray="4,3" opacity="0.8" vector-effect="non-scaling-stroke"/>
+          <line x1="${todayX.toFixed(1)}" y1="${todayY.toFixed(1)}" x2="${plotRight}" y2="${projY.toFixed(1)}" stroke="var(--warning-color)" stroke-width="1.6" stroke-dasharray="3,3" vector-effect="non-scaling-stroke"/>
+          <polyline points="${pathStr}" fill="none" stroke="var(--info-color, var(--primary-color))" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+          <line x1="${(todayX - 1.4).toFixed(1)}" y1="${todayY.toFixed(1)}" x2="${(todayX + 1.4).toFixed(1)}" y2="${todayY.toFixed(1)}" stroke="var(--info-color, var(--primary-color))" stroke-width="3.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
         </svg>`;
+
+      const labels = `
+        <span class="vc-chart-label" style="left:0; top:${plotBottom}%;">${escHtml(t(hass, "lease_start_label"))}</span>
+        <span class="vc-chart-label vc-chart-label-strong" style="left:${todayX.toFixed(1)}%; top:${plotBottom}%; transform:translate(-50%,6px);">${escHtml(t(hass, "lease_today_label"))}</span>
+        <span class="vc-chart-label vc-chart-label-right" style="top:${plotBottom}%;">${escHtml(t(hass, "lease_end_label"))}</span>
+        <span class="vc-chart-label vc-chart-label-right" style="top:${budgetY.toFixed(1)}%; transform:translateY(-100%);">${escHtml(t(hass, "lease_target", { km: Math.round(lease.limit) }))}</span>
+        <span class="vc-chart-label vc-chart-label-right" style="top:${projY.toFixed(1)}%; transform:translateY(-100%); color:var(--warning-color);">${escHtml(t(hass, "lease_projection", { km: Math.round(lease.projectedTotal) }))}</span>
+      `;
+
+      return `<div class="vc-chart-wrap" style="height:130px;">${svg}${labels}</div>`;
     }
 
     // The lease section's own "last 7 days" view — same odometer daily-
     // distance data as the general Distance driven section, but with a
     // dashed reference line at the lease's daily budget (annual limit /
     // 365) so each bar's color communicates over/under that specific
-    // budget, not just a generic trend.
+    // budget, not just a generic trend. Same full-width/HTML-label
+    // approach as _renderDistanceBars — see the comment there.
     _renderLeaseDailyBars(deviceId, annualLimitKm, hass) {
       const distances = this._odoHistory.get(deviceId)?.distances || [];
       const dailyBudget = annualLimitKm / 365;
       if (!distances.length || distances.every((v) => v === null)) {
-        return `<svg viewBox="0 0 200 70" width="100%" height="60" class="vc-spark"></svg>`;
+        return `<div class="vc-chart-wrap" style="height:64px;"><svg viewBox="0 0 100 100" width="100%" height="100%" class="vc-spark"></svg></div>`;
       }
 
       const maxVal = Math.max(...distances.filter((v) => v !== null), dailyBudget, 1);
       const axisMax = maxVal * 1.15;
       const n = distances.length;
-      const plotLeft = 24, plotRight = 190, plotBottom = 50, plotTop = 8;
-      const plotW = plotRight - plotLeft;
-      const gap = plotW / n;
-      const barW = gap * 0.55;
+      const plotLeft = 1, plotRight = 99, plotBottom = 96, plotTop = 4;
+      const gap = (plotRight - plotLeft) / n;
+      const barW = gap * 0.6;
       const yAt = (v) => plotBottom - (Math.max(0, v) / axisMax) * (plotBottom - plotTop);
       const budgetY = yAt(dailyBudget);
 
@@ -1167,23 +1203,24 @@
         const x = plotLeft + i * gap + (gap - barW) / 2;
         const y = yAt(v);
         const color = v > dailyBudget ? "var(--warning-color)" : "var(--success-color)";
-        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="2" fill="${color}"/>`;
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="${color}"/>`;
       }).join("");
 
-      const labels = distances.map((_, i) => {
-        const x = plotLeft + i * gap + gap / 2;
-        return `<text x="${x.toFixed(1)}" y="${(plotBottom + 9).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)" text-anchor="middle">${escHtml(dayLabel(i))}</text>`;
-      }).join("");
+      const dayLabels = distances.map((_, i) => `<span>${escHtml(dayLabel(i))}</span>`).join("");
+
+      const svg = `
+        <svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="none" style="display:block;">
+          <line x1="${plotLeft}" y1="${budgetY.toFixed(1)}" x2="${plotRight}" y2="${budgetY.toFixed(1)}" stroke="var(--secondary-text-color)" stroke-width="1" stroke-dasharray="3,3" opacity="0.6" vector-effect="non-scaling-stroke"/>
+          ${bars}
+        </svg>`;
 
       return `
-        <svg viewBox="0 0 200 70" width="100%" height="60" style="display:block;">
-          <text x="0" y="${(plotTop + 3).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)">${Math.round(axisMax)}</text>
-          <text x="6" y="${(plotBottom + 2).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)">0</text>
-          <line x1="${plotLeft}" y1="${budgetY.toFixed(1)}" x2="${plotRight}" y2="${budgetY.toFixed(1)}" stroke="var(--secondary-text-color)" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
-          <text x="${plotRight}" y="${(budgetY - 2.5).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_daily_budget", { km: Math.round(dailyBudget * 10) / 10 }))}</text>
-          ${bars}
-          ${labels}
-        </svg>`;
+        <div class="vc-chart-yaxis">
+          <span>0–${Math.round(axisMax)} km</span>
+          <span>${escHtml(t(hass, "lease_daily_budget", { km: Math.round(dailyBudget * 10) / 10 }))}</span>
+        </div>
+        <div class="vc-chart-wrap" style="height:64px;">${svg}</div>
+        <div class="vc-chart-daylabels">${dayLabels}</div>`;
     }
 
     _renderPosition(d, hass) {
@@ -1211,7 +1248,7 @@
       const valueText = st && st.state !== "unknown" && st.state !== "unavailable" ? `${st.state} ${unit}` : "—";
       const days = Math.round(this._config.stats_history_hours / 24);
       const history = this._history.get(vehicle.device_id);
-      const svg = this._renderSparkline(history, isEv);
+      const svg = this._renderSparkline(history, isEv, hass, this._config.stats_history_hours, unit);
 
       return `
         <div class="vc-section">
@@ -1223,25 +1260,43 @@
         </div>`;
     }
 
-    _renderSparkline(history, isEv) {
+    // Same full-width/HTML-label approach as _renderDistanceBars — see the
+    // comment there for why text lives outside the "none"-scaled SVG.
+    _renderSparkline(history, isEv, hass, hours, unit) {
       const colorVar = isEv ? "var(--success-color)" : "var(--warning-color)";
       if (!history || !history.values || history.values.length === 0) {
-        return `<svg viewBox="0 0 160 44" width="100%" height="40" class="vc-spark"></svg>`;
+        return `<div class="vc-chart-wrap" style="height:70px;"><svg viewBox="0 0 100 100" width="100%" height="100%" class="vc-spark"></svg></div>`;
       }
       const values = history.values;
       const max = Math.max(...values, 0.0001);
       const min = Math.min(...values, 0);
       const range = Math.max(max - min, 0.0001);
       const n = values.length;
+      const plotLeft = 1, plotRight = 99, plotTop = 8, plotBottom = 78;
       const pts = values.map((v, i) => {
-        const x = (i / (n - 1)) * 160;
-        const y = 34 - ((v - min) / range) * 30;
+        const x = n > 1 ? plotLeft + (i / (n - 1)) * (plotRight - plotLeft) : (plotLeft + plotRight) / 2;
+        const y = plotBottom - ((v - min) / range) * (plotBottom - plotTop);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       });
-      return `
-        <svg viewBox="0 0 160 44" width="100%" height="40" preserveAspectRatio="none" class="vc-spark">
-          <polyline points="${pts.join(" ")}" fill="none" stroke="${colorVar}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+
+      const end = history.fetchedAt ? new Date(history.fetchedAt) : new Date();
+      const start = new Date(end.getTime() - (hours || 0) * 3600 * 1000);
+      const dateLabel = (d) => d.toLocaleDateString(lang(hass), { day: "numeric", month: "short" });
+      const unitSuffix = unit ? ` ${unit}` : "";
+
+      const svg = `
+        <svg viewBox="0 0 100 100" width="100%" height="100%" preserveAspectRatio="none" style="display:block;">
+          <polyline points="${pts.join(" ")}" fill="none" stroke="${colorVar}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
         </svg>`;
+
+      const labels = `
+        <span class="vc-chart-label" style="left:0; top:${plotTop}%; transform:translateY(-100%);">${escHtml(Math.round(max) + unitSuffix)}</span>
+        <span class="vc-chart-label" style="left:0; top:${plotBottom}%; transform:translateY(-100%);">${escHtml(Math.round(min) + unitSuffix)}</span>
+        <span class="vc-chart-label" style="left:0; top:${plotBottom}%;">${escHtml(dateLabel(start))}</span>
+        <span class="vc-chart-label vc-chart-label-right" style="top:${plotBottom}%;">${escHtml(dateLabel(end))}</span>
+      `;
+
+      return `<div class="vc-chart-wrap" style="height:78px;">${svg}${labels}</div>`;
     }
 
     _maybeRefreshHistory(deviceId) {
@@ -1624,6 +1679,21 @@
         .vc-stats-head { display: flex; justify-content: space-between; align-items: baseline; }
         .vc-stats-val { font-size: 13px; font-weight: 700; color: var(--primary-text-color); }
         .vc-spark { display: block; }
+        .vc-chart-yaxis {
+          display: flex; justify-content: space-between; gap: 8px;
+          font-size: 10.5px; color: var(--secondary-text-color); margin-bottom: 4px;
+        }
+        .vc-chart-wrap { position: relative; width: 100%; }
+        .vc-chart-label {
+          position: absolute; font-size: 10.5px; color: var(--secondary-text-color);
+          white-space: nowrap; transform: translateY(6px);
+        }
+        .vc-chart-label-strong { font-weight: 700; color: var(--primary-text-color); }
+        .vc-chart-label-right { right: 0; }
+        .vc-chart-daylabels {
+          display: flex; justify-content: space-between; margin-top: 4px;
+          font-size: 10.5px; color: var(--secondary-text-color);
+        }
       `;
     }
   }
