@@ -120,6 +120,10 @@ show_stats: true
 
 ## Changelog
 
+### 0.7.1 (2026-09-13)
+
+- Fixed a real gap in the Lease budget section: the daily distance chart ("Last 7 days") shown in the reviewed design was missing from the actual `0.7.0` release — only the separate, pre-existing Distance driven section existed. Added a dedicated 7-day bar chart, colored per day against the lease's own daily budget (annual limit ÷ 365), so it's visible whenever a vehicle has lease tracking configured, even with `show_stats: false`.
+
 ### 0.7.0 (2026-09-13)
 
 - Added an optional **Lease mileage budget** section (closes #2): set an annual km limit and lease start date, get a countdown, a pace status, and an annual usage chart with a projection at your current rate. The odometer baseline can be entered manually or auto-detected from Home Assistant's long-term statistics.
