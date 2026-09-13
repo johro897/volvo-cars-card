@@ -315,6 +315,26 @@ const vLeaseXc60Expanded = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[
 assert("expanding reveals the 'km left this year' stat", vLeaseXc60Expanded.innerHTML.includes("km left this year"));
 assert("expanding reveals the annual usage chart with the configured target", vLeaseXc60Expanded.innerHTML.includes("Target 20000 km"));
 assert("expanding reveals the manual baseline note", vLeaseXc60Expanded.innerHTML.includes("manually entered"));
+assert("expanding reveals a 'Last 7 days' heading inside the lease section (regression: this was only in the design mockup, missing from the first real implementation)", vLeaseXc60Expanded.innerHTML.includes("Last 7 days"));
+
+// Seed synthetic daily-distance data directly (bypassing the async history
+// fetch, which the shared mock always resolves empty) to test the lease
+// section's own daily bars — distinct from the general Distance driven
+// chart because it colors bars against the LEASE's daily budget (20000/365
+// ≈ 54.8 km/day here), not just a generic min/max trend.
+cardLease._odoHistory.set("dev_xc60", { distances: [30, 60, 40, 80, 20, 70, 50], fetchedAt: Date.now(), fetching: false });
+cardLease._render();
+const vLeaseXc60WithBars = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
+assert("lease section's daily chart shows the daily budget reference label (20000/365 ≈ 54.8 km/day)", vLeaseXc60WithBars.innerHTML.includes("54.8 km/day"));
+
+// Scope to just the lease section's own wrapper — the vehicle also has a
+// door diagram elsewhere with its own unrelated <rect> elements.
+const leaseSectionEl = vLeaseXc60WithBars.querySelector('[data-action="toggle-section"][data-section="lease"]').closest(".vc-section");
+const leaseRects = leaseSectionEl.querySelectorAll("svg rect");
+assert("seeded daily distances render as SVG bars (7 days of data)", leaseRects.length === 7);
+const barColors = Array.from(leaseRects).map((r) => r.getAttribute("fill"));
+assert("bars over the daily budget (60,80,70) are colored with the warning token", barColors.filter((c) => c === "var(--warning-color)").length === 3);
+assert("bars under the daily budget (30,40,20,50) are colored with the success token", barColors.filter((c) => c === "var(--success-color)").length === 4);
 
 // --- Lease budget: auto-detected baseline via mocked recorder statistics ---
 const wsCalls = [];

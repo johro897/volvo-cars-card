@@ -72,6 +72,8 @@
       lease_legend: "Solid = driven · dashed grey = budget pace · dashed amber = projection at current rate",
       lease_baseline_auto: "Baseline: auto-detected from history",
       lease_baseline_manual: "Baseline: {km} km · manually entered",
+      lease_last_7_days: "Last 7 days",
+      lease_daily_budget: "{km} km/day avg",
       editor_lease_limit: "Annual lease limit (km, optional)",
       editor_lease_start_date: "Lease start date (YYYY-MM-DD, optional)",
       editor_lease_start_odometer: "Odometer at lease start (km, optional — recommended)",
@@ -181,6 +183,8 @@
       lease_legend: "Heldragen = körd sträcka · streckad grå = budgettakt · streckad amber = prognos vid nuvarande takt",
       lease_baseline_auto: "Baslinje: automatiskt hittad från historik",
       lease_baseline_manual: "Baslinje: {km} km · manuellt angiven",
+      lease_last_7_days: "Senaste 7 dagarna",
+      lease_daily_budget: "{km} km/dag snitt",
       editor_lease_limit: "Årlig leasinggräns (km, valfritt)",
       editor_lease_start_date: "Leasingårets startdatum (ÅÅÅÅ-MM-DD, valfritt)",
       editor_lease_start_odometer: "Mätarställning vid leasingstart (km, valfritt — rekommenderas)",
@@ -636,6 +640,11 @@
       for (const v of this._config.vehicles) {
         if (v.lease_annual_limit_km && v.lease_start_date) {
           this._maybeRefreshLeaseStats(v);
+          // The lease section's own "last 7 days" chart needs the same
+          // odometer daily-history data as the general Distance driven
+          // section — fetch it even when show_stats is off, since the
+          // lease budget is a separately opted-in feature.
+          if (!this._config.show_stats) this._maybeRefreshOdometerHistory(v.device_id);
         }
       }
     }
@@ -1067,6 +1076,10 @@
             ${this._renderLeaseChart(lease, hass)}
             <div style="font-size:10px; color:var(--secondary-text-color); margin-top:2px;">${escHtml(t(hass, "lease_legend"))}</div>
           </div>
+          <div style="margin-top:12px;">
+            <div class="vc-section-title" style="margin-bottom:6px;">${escHtml(t(hass, "lease_last_7_days"))}</div>
+            ${this._renderLeaseDailyBars(deviceId, lease.limit, hass)}
+          </div>
           <div style="font-size:10.5px; color:var(--secondary-text-color); margin-top:10px;">${escHtml(baselineNote)}</div>
         `;
       } else if (expanded) {
@@ -1116,6 +1129,60 @@
           <text x="10" y="70" font-size="7" fill="var(--secondary-text-color)" text-anchor="start">${escHtml(t(hass, "lease_start_label"))}</text>
           <text x="${todayX.toFixed(1)}" y="70" font-size="7" fill="var(--primary-text-color)" font-weight="700" text-anchor="middle">${escHtml(t(hass, "lease_today_label"))}</text>
           <text x="190" y="70" font-size="7" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_end_label"))}</text>
+        </svg>`;
+    }
+
+    // The lease section's own "last 7 days" view — same odometer daily-
+    // distance data as the general Distance driven section, but with a
+    // dashed reference line at the lease's daily budget (annual limit /
+    // 365) so each bar's color communicates over/under that specific
+    // budget, not just a generic trend.
+    _renderLeaseDailyBars(deviceId, annualLimitKm, hass) {
+      const distances = this._odoHistory.get(deviceId)?.distances || [];
+      const dailyBudget = annualLimitKm / 365;
+      if (!distances.length || distances.every((v) => v === null)) {
+        return `<svg viewBox="0 0 200 70" width="100%" height="60" class="vc-spark"></svg>`;
+      }
+
+      const maxVal = Math.max(...distances.filter((v) => v !== null), dailyBudget, 1);
+      const axisMax = maxVal * 1.15;
+      const n = distances.length;
+      const plotLeft = 24, plotRight = 190, plotBottom = 50, plotTop = 8;
+      const plotW = plotRight - plotLeft;
+      const gap = plotW / n;
+      const barW = gap * 0.55;
+      const yAt = (v) => plotBottom - (Math.max(0, v) / axisMax) * (plotBottom - plotTop);
+      const budgetY = yAt(dailyBudget);
+
+      const now = new Date();
+      const dayLabel = (i) => {
+        const d = new Date(now);
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - (n - 1 - i));
+        return d.toLocaleDateString(lang(hass), { weekday: "short" });
+      };
+
+      const bars = distances.map((v, i) => {
+        if (v === null) return "";
+        const x = plotLeft + i * gap + (gap - barW) / 2;
+        const y = yAt(v);
+        const color = v > dailyBudget ? "var(--warning-color)" : "var(--success-color)";
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="2" fill="${color}"/>`;
+      }).join("");
+
+      const labels = distances.map((_, i) => {
+        const x = plotLeft + i * gap + gap / 2;
+        return `<text x="${x.toFixed(1)}" y="${(plotBottom + 9).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)" text-anchor="middle">${escHtml(dayLabel(i))}</text>`;
+      }).join("");
+
+      return `
+        <svg viewBox="0 0 200 70" width="100%" height="60" style="display:block;">
+          <text x="0" y="${(plotTop + 3).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)">${Math.round(axisMax)}</text>
+          <text x="6" y="${(plotBottom + 2).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)">0</text>
+          <line x1="${plotLeft}" y1="${budgetY.toFixed(1)}" x2="${plotRight}" y2="${budgetY.toFixed(1)}" stroke="var(--secondary-text-color)" stroke-width="1" stroke-dasharray="3,3" opacity="0.6"/>
+          <text x="${plotRight}" y="${(budgetY - 2.5).toFixed(1)}" font-size="6.5" fill="var(--secondary-text-color)" text-anchor="end">${escHtml(t(hass, "lease_daily_budget", { km: Math.round(dailyBudget * 10) / 10 }))}</text>
+          ${bars}
+          ${labels}
         </svg>`;
     }
 
