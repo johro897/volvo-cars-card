@@ -120,6 +120,10 @@ show_stats: true
 
 ## Changelog
 
+### 0.8.1 (2026-09-20)
+
+- Bar charts (Distance driven, Lease budget's "Last 7 days") now show a hover tooltip with the exact day and value, instead of only a height to eyeball against the axis scale (closes #7).
+
 ### 0.8.0 (2026-09-13)
 
 - All four charts (consumption sparkline, Distance driven bars, Lease budget's annual usage chart, and its "Last 7 days" bars) now stretch to the card's full width instead of being squeezed into a narrow, centered strip — the two lease charts were missing `preserveAspectRatio="none"` entirely (closes #6), unlike the other two charts which already had it (but had no labels — see below).
