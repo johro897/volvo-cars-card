@@ -120,6 +120,10 @@ show_stats: true
 
 ## Changelog
 
+### 0.8.2 (2026-09-20)
+
+- The Lease budget section now shows how many rest (0 km) days are needed to land back on budget, whenever you're over pace: inline in the collapsed summary ("64 km over pace · 2 rest days needed") and as its own stat tile once expanded. Uses the year-to-date average pace (the same basis the existing pace/projection numbers already use), not a short recent window — a 7-day average can hit exactly 0 after a single rested week and make the number swing to "nothing needed" overnight even though the year-long picture hasn't really changed. Closes #8.
+
 ### 0.8.1 (2026-09-20)
 
 - Bar charts (Distance driven, Lease budget's "Last 7 days") now show a hover tooltip with the exact day and value, instead of only a height to eyeball against the axis scale (closes #7).

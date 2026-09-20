@@ -278,17 +278,25 @@ assert("used = current odometer (18420) minus manual baseline (10000)", underLea
 assert("remaining = limit minus used (20000 - 8420)", Math.round(underLease.remaining) === 11580);
 assert("driving far less than 8420km by day 255 of 365 is classified as under pace", underLease.paceStatus === "under" && underLease.overPaceKm < 0);
 assert("projected year-end total at this (slow) rate stays under the annual limit", underLease.projectedTotal < underLease.limit);
+assert("restDaysNeeded is 0 when massively under pace — resting is never 'needed' to make the math work", underLease.restDaysNeeded === 0);
 
 const overPaceVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 };
 const overLease = card._computeLease(overPaceVehicle, dXc60, hass, leaseNow);
 assert("used = 18420 - 2000 = 16420", overLease.used === 16420);
 assert("driving 16420km by day 255 of 365 (well above the ~14000km expected pace) is classified as over pace", overLease.paceStatus === "over" && overLease.overPaceKm > 0);
 assert("16420 used is still under the 20000 annual limit, so overLimit is false", overLease.overLimit === false);
+// restDaysNeeded uses the year-to-date average (used/daysElapsed), the same
+// basis as overPaceKm/projectedTotal above — recomputed here from the
+// already-asserted fields rather than a hardcoded day count, so this stays
+// correct if the fixed "leaseNow"/day-of-year assumptions above ever change.
+const expectedRestDays = Math.max(0, Math.min(overLease.daysLeft, Math.ceil(overLease.daysLeft - overLease.remaining / (overLease.used / overLease.daysElapsed))));
+assert("restDaysNeeded matches days_left - (km_left / year-to-date avg), clamped to [0, daysLeft]", overLease.restDaysNeeded === expectedRestDays && overLease.restDaysNeeded > 0);
 
 const overLimitVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 15000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 };
 const overLimitLease = card._computeLease(overLimitVehicle, dXc60, hass, leaseNow);
 assert("used (16420) exceeding a 15000 annual limit is classified as overLimit", overLimitLease.overLimit === true);
 assert("remaining goes negative once the annual limit is actually exceeded", Math.round(overLimitLease.remaining) === -1420);
+assert("restDaysNeeded is 0 once already over the limit — resting can't undo km already driven", overLimitLease.restDaysNeeded === 0);
 
 const noConfigLease = card._computeLease({ device_id: "dev_xc60" }, dXc60, hass, leaseNow);
 assert("a vehicle with no lease config returns null (feature not enabled for that vehicle)", noConfigLease === null);
@@ -316,6 +324,20 @@ assert("expanding reveals the 'km left this year' stat", vLeaseXc60Expanded.inne
 assert("expanding reveals the annual usage chart with the configured target", vLeaseXc60Expanded.innerHTML.includes("Target 20000 km"));
 assert("expanding reveals the manual baseline note", vLeaseXc60Expanded.innerHTML.includes("manually entered"));
 assert("expanding reveals a 'Last 7 days' heading inside the lease section (regression: this was only in the design mockup, missing from the first real implementation)", vLeaseXc60Expanded.innerHTML.includes("Last 7 days"));
+
+// --- #8: "how many rest days needed" — collapsed inline note + expanded
+// stat tile, only shown while over pace (mirrors the mockup's variant A+B).
+// Computed independently here (not hardcoded) since it depends on today's
+// real date, not a fixed synthetic "now" like the pure-logic tests above.
+const liveOverLease = cardLease._computeLease(
+  { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 },
+  cardLease._discoverVehicle("dev_xc60"),
+  hass
+);
+assert("this scenario is still over pace against today's real date (sanity check for the assertions below)", liveOverLease.paceStatus === "over");
+assert("restDaysNeeded is a positive whole number for this dramatically-over-pace scenario", Number.isInteger(liveOverLease.restDaysNeeded) && liveOverLease.restDaysNeeded > 0);
+assert("collapsed summary includes the rest-days-needed inline note", leaseToggle.innerHTML.includes(`${liveOverLease.restDaysNeeded} rest day`));
+assert("expanded view includes a 'rest days needed' stat tile with the same number", vLeaseXc60Expanded.innerHTML.includes("rest days needed") && vLeaseXc60Expanded.innerHTML.includes(`>${liveOverLease.restDaysNeeded}<`));
 
 // Seed synthetic daily-distance data directly (bypassing the async history
 // fetch, which the shared mock always resolves empty) to test the lease

@@ -63,6 +63,8 @@
       lease_on_pace: "On pace",
       lease_km_left: "km left this year",
       lease_days_left: "days left in lease year",
+      lease_rest_days_inline: " · {days} rest day(s) needed",
+      lease_rest_days_label: "rest days needed",
       lease_chart_title: "Annual usage vs. budget",
       lease_target: "Target {km} km",
       lease_projection: "~{km} km at this rate",
@@ -174,6 +176,8 @@
       lease_on_pace: "I takt",
       lease_km_left: "km kvar i år",
       lease_days_left: "dagar kvar av leasingår",
+      lease_rest_days_inline: " · {days} vilodag(ar) behövs",
+      lease_rest_days_label: "vilodagar behövs",
       lease_chart_title: "Årsförbrukning vs. budget",
       lease_target: "Mål {km} km",
       lease_projection: "~{km} km i denna takt",
@@ -1073,7 +1077,10 @@
       } else if (lease.overLimit) {
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--error-color);">${escHtml(t(hass, "lease_over_limit", { km: Math.round(lease.used - lease.limit) }))}</span>`;
       } else if (lease.paceStatus === "over") {
-        summaryHtml = `<span class="vc-expand-summary" style="color:var(--warning-color);">${escHtml(t(hass, "lease_over_pace", { km: Math.round(lease.overPaceKm) }))}</span>`;
+        const restNote = lease.restDaysNeeded > 0
+          ? `<span class="vc-rest-inline">${escHtml(t(hass, "lease_rest_days_inline", { days: lease.restDaysNeeded }))}</span>`
+          : "";
+        summaryHtml = `<span class="vc-expand-summary" style="color:var(--warning-color);">${escHtml(t(hass, "lease_over_pace", { km: Math.round(lease.overPaceKm) }))}${restNote}</span>`;
       } else if (lease.paceStatus === "under") {
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_under_pace", { km: Math.round(-lease.overPaceKm) }))}</span>`;
       } else {
@@ -1085,8 +1092,15 @@
         const baselineNote = lease.baselineSource === "manual"
           ? t(hass, "lease_baseline_manual", { km: Math.round(lease.baselineValue) })
           : t(hass, "lease_baseline_auto");
+        const restTileHtml = lease.paceStatus === "over"
+          ? `
+            <div>
+              <div style="font-size:20px; font-weight:800; line-height:1; color:${lease.restDaysNeeded > 0 ? "var(--warning-color)" : "var(--success-color)"};">${escHtml(lease.restDaysNeeded)}</div>
+              <div style="font-size:11px; color:var(--secondary-text-color); margin-top:3px;">${escHtml(t(hass, "lease_rest_days_label"))}</div>
+            </div>`
+          : "";
         detailHtml = `
-          <div style="display:flex; gap:20px; margin-top:10px;">
+          <div style="display:flex; gap:20px; margin-top:10px; flex-wrap:wrap;">
             <div>
               <div style="font-size:20px; font-weight:800; color:var(--primary-text-color); line-height:1;">${escHtml(Math.round(lease.remaining))} km</div>
               <div style="font-size:11px; color:var(--secondary-text-color); margin-top:3px;">${escHtml(t(hass, "lease_km_left"))}</div>
@@ -1095,6 +1109,7 @@
               <div style="font-size:20px; font-weight:800; color:var(--primary-text-color); line-height:1;">${escHtml(lease.daysLeft)}</div>
               <div style="font-size:11px; color:var(--secondary-text-color); margin-top:3px;">${escHtml(t(hass, "lease_days_left"))}</div>
             </div>
+            ${restTileHtml}
           </div>
           <div style="margin-top:12px;">
             <div class="vc-section-title" style="margin-bottom:6px;">${escHtml(t(hass, "lease_chart_title"))}</div>
@@ -1516,6 +1531,21 @@
 
       const projectedTotal = daysElapsed > 0 ? used * (daysInYear / daysElapsed) : used;
 
+      // How many of the remaining days need to be 0 km, assuming the other
+      // days continue at the year-to-date average, to land at/under the
+      // limit. Uses the year-to-date average (same basis as overPaceKm/
+      // projectedTotal above) rather than a recent-days average on purpose:
+      // a short window can hit exactly 0 (a rested week) and make the
+      // number swing to "0 needed" overnight even though nothing about the
+      // annual math actually improved that much — the slower year-to-date
+      // average stays consistent with the pace status shown next to it
+      // instead of contradicting it. Irrelevant once already over the
+      // limit (resting can't undo km already driven), so left at 0 there.
+      const avgDailyRate = daysElapsed > 0 ? used / daysElapsed : 0;
+      const restDaysNeeded = !overLimit && avgDailyRate > 0
+        ? Math.max(0, Math.min(daysLeft, Math.ceil(daysLeft - remaining / avgDailyRate)))
+        : 0;
+
       return {
         status: "ok",
         baselineValue, baselineSource,
@@ -1523,7 +1553,7 @@
         daysInYear, daysElapsed, daysLeft,
         expectedUsed, overPaceKm, paceStatus,
         anniversaryStart, anniversaryEnd,
-        chartPoints, projectedTotal,
+        chartPoints, projectedTotal, restDaysNeeded,
       };
     }
 
@@ -1663,6 +1693,7 @@
           background: none; border: none; padding: 0; margin: 0; cursor: pointer; text-align: left;
         }
         .vc-expand-summary { font-size: 12px; font-weight: 700; margin-left: auto; }
+        .vc-rest-inline { font-weight: 500; opacity: 0.85; }
         .vc-chevron { flex: 0 0 auto; display: flex; transition: transform 0.15s ease; }
         .vc-warning-row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--primary-text-color); margin-top: 6px; }
         .vc-doors-row { display: flex; gap: 16px; align-items: flex-start; }
