@@ -1045,7 +1045,8 @@
         if (v === null) return "";
         const x = plotLeft + i * gap + (gap - barW) / 2;
         const y = yAt(v);
-        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="var(--info-color, var(--primary-color))"/>`;
+        const title = `<title>${escHtml(dayLabel(i))}: ${Math.round(v)} km</title>`;
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="var(--info-color, var(--primary-color))">${title}</rect>`;
       }).join("");
 
       const dayLabels = distances.map((_, i) => `<span>${escHtml(dayLabel(i))}</span>`).join("");
@@ -1202,8 +1203,10 @@
         if (v === null) return "";
         const x = plotLeft + i * gap + (gap - barW) / 2;
         const y = yAt(v);
-        const color = v > dailyBudget ? "var(--warning-color)" : "var(--success-color)";
-        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="${color}"/>`;
+        const overBudget = v > dailyBudget;
+        const color = overBudget ? "var(--warning-color)" : "var(--success-color)";
+        const title = `<title>${escHtml(dayLabel(i))}: ${Math.round(v)} km (${overBudget ? "over" : "under"} daily budget)</title>`;
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="${color}">${title}</rect>`;
       }).join("");
 
       const dayLabels = distances.map((_, i) => `<span>${escHtml(dayLabel(i))}</span>`).join("");
