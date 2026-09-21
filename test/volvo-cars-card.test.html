@@ -322,8 +322,26 @@ const earlyYearVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, 
 const earlyYearLease = card._computeLease(earlyYearVehicle, dXc60, hass, leaseNow);
 assert("only ~8 days into the lease year, a small ~22km deviation stays within tolerance under the default 'today' basis", earlyYearLease.paceBasis === "today" && earlyYearLease.paceStatus === "on");
 assert("but the same data point already projects a large year-end overage (confirms the reported real-world scenario)", earlyYearLease.projectedOverKm > 900);
+
+// Real report (2026-09-21): with only ~8 days of data, "projected" showed
+// a dramatic (and, on a second real report, a wildly swinging) status —
+// too little data to trust an extrapolation across the WHOLE remaining
+// year. Gated behind a minimum days-elapsed threshold: "projected" falls
+// back to the "today" comparison until then, surfaced via
+// `projectionReady`/`effectivePaceBasis` rather than silently ignored.
 const earlyYearProjectedLease = card._computeLease({ ...earlyYearVehicle, lease_pace_basis: "projected" }, dXc60, hass, leaseNow);
-assert("switching lease_pace_basis to 'projected' flips the SAME scenario to 'over pace'", earlyYearProjectedLease.paceBasis === "projected" && earlyYearProjectedLease.paceStatus === "over");
+assert("only ~8 days in, 'projected' basis is NOT ready yet and falls back to 'today' instead of flipping to 'over'", earlyYearProjectedLease.projectionReady === false && earlyYearProjectedLease.effectivePaceBasis === "today" && earlyYearProjectedLease.paceStatus === "on");
+assert("the configured basis is still reported as 'projected' even while falling back (so the render layer can show the 'collecting data' note)", earlyYearProjectedLease.paceBasis === "projected");
+
+// Once 21 days have elapsed (owner-confirmed threshold), the SAME kind of
+// deviation genuinely flips "projected" to "over" — the gate lifts, it
+// doesn't just disable the basis permanently.
+const readyVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-08-23", lease_start_odometer_km: 16769 };
+const readyLease = card._computeLease(readyVehicle, dXc60, hass, leaseNow);
+assert("exactly 21 days elapsed counts as 'enough data' for the projection gate", readyLease.projectionReady === true && readyLease.daysElapsed === 21);
+assert("with enough data, this small-but-real deviation still stays 'on' under the default 'today' basis", readyLease.paceStatus === "on" && readyLease.effectivePaceBasis === "today");
+const readyProjectedLease = card._computeLease({ ...readyVehicle, lease_pace_basis: "projected" }, dXc60, hass, leaseNow);
+assert("once ready, switching to 'projected' basis genuinely flips this scenario to 'over pace' (the gate lifts rather than permanently disabling the basis)", readyProjectedLease.effectivePaceBasis === "projected" && readyProjectedLease.paceStatus === "over");
 
 // "remaining_rate" basis: compares two RATES (recalculated remaining daily
 // budget vs. a recent actual daily rate) instead of extrapolating a
@@ -365,6 +383,24 @@ leaseToggle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
 const vLeaseXc60Expanded = cardLease.shadowRoot.querySelectorAll(".vc-vehicle")[0];
 assert("expanding reveals the 'km left this year' stat", vLeaseXc60Expanded.innerHTML.includes("km left this year"));
 assert("expanding reveals the annual usage chart with the configured target", vLeaseXc60Expanded.innerHTML.includes("Target 20000 km"));
+// Real report (2026-09-21): the summary's "X km over pace" and the chart's
+// separate "~Y km at this rate" made the reader do the subtraction
+// themselves to see they were the same fact. The chart's projection label
+// now states the delta directly alongside the total.
+assert("the projection label states the delta alongside the total, instead of two unlinked numbers to subtract by hand", /~\d+ km at this rate \([+-]?\d+ km vs\. target\)/.test(vLeaseXc60Expanded.innerHTML));
+
+// Render-level check for the "collecting more data" note, using a real
+// near-term lease_start_date (5 days ago) so it's inside the projection
+// gate regardless of what day this suite actually runs on.
+const recentStart = new Date();
+recentStart.setDate(recentStart.getDate() - 5);
+const recentStartStr = recentStart.toISOString().slice(0, 10);
+const gatedVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: recentStartStr, lease_start_odometer_km: 2000, lease_pace_basis: "projected" };
+const dXc60ForCardLease = cardLease._discoverVehicle("dev_xc60");
+const gatedHtml = cardLease._renderLeaseBudget(gatedVehicle, dXc60ForCardLease, hass);
+assert("a lease started 5 days ago with 'projected' configured shows the 'collecting more data' note in the summary", gatedHtml.includes("Collecting more data before projecting"));
+assert("...and does NOT show 'projected'-specific wording while gated (confirms the fallback, not just an extra note tacked onto the wrong text)", !gatedHtml.includes("Projected "));
+assert("...and hides the rest-days-needed note while gated, even though the fallback status is 'over'", !gatedHtml.includes("rest day"));
 assert("expanding reveals the manual baseline note", vLeaseXc60Expanded.innerHTML.includes("manually entered"));
 assert("expanding reveals a 'Last 7 days' heading inside the lease section (regression: this was only in the design mockup, missing from the first real implementation)", vLeaseXc60Expanded.innerHTML.includes("Last 7 days"));
 

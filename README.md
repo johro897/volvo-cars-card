@@ -120,6 +120,13 @@ show_stats: true
 
 ## Changelog
 
+### 0.9.1 (2026-09-21)
+
+Fixes two real points of confusion reported right after 0.9.0 shipped:
+
+- The annual usage chart's projection label now states the over/under delta directly ("~22630 km at this rate (+2630 km vs. target)") instead of a lone total the reader had to subtract from the target themselves to connect to the summary line's own "X km over pace" figure.
+- The `"projected"` pace basis (and the "rest days needed" figure, which shares the same year-to-date extrapolation) now waits until at least 21 days into the lease year before it drives the status — a deviation this early gets amplified by a large multiplier and produced a dramatic, unreliable number (47 "rest days needed" after only ~10 days, in the reported case). Before day 21, the summary falls back to the `"today"` comparison and shows *"Collecting more data before projecting (day N of 365)"* instead, so the fallback isn't silently different from what was configured.
+
 ### 0.9.0 (2026-09-21)
 
 - The Lease budget's over/under-pace status is now configurable per vehicle instead of a fixed rule, after a real report that "On pace" and the annual usage chart's own projection could disagree early in a lease year:

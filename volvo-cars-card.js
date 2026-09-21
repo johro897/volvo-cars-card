@@ -71,7 +71,8 @@
       lease_rest_days_label: "rest days needed",
       lease_chart_title: "Annual usage vs. budget",
       lease_target: "Target {km} km",
-      lease_projection: "~{km} km at this rate",
+      lease_projection: "~{km} km at this rate ({delta} vs. target)",
+      lease_collecting_projection_note: " · Collecting more data before projecting (day {day} of {total})",
       lease_start_label: "Start",
       lease_today_label: "Today",
       lease_end_label: "End",
@@ -193,7 +194,8 @@
       lease_rest_days_label: "vilodagar behövs",
       lease_chart_title: "Årsförbrukning vs. budget",
       lease_target: "Mål {km} km",
-      lease_projection: "~{km} km i denna takt",
+      lease_projection: "~{km} km i denna takt ({delta} mot mål)",
+      lease_collecting_projection_note: " · Samlar mer data innan prognos (dag {day} av {total})",
       lease_start_label: "Start",
       lease_today_label: "Idag",
       lease_end_label: "Slut",
@@ -332,6 +334,10 @@
   const DAY_MS = 24 * 3600 * 1000;
   const LEASE_PACE_TOLERANCE_DEFAULT_PCT = 3; // owner-configurable per vehicle via lease_pace_tolerance_pct
   const LEASE_PACE_BASIS_VALUES = ["today", "projected", "remaining_rate"];
+  // A projection extrapolated from very few days is too noisy to drive a
+  // status flip (day ~9 of 365 real report: a small in-tolerance deviation
+  // projected to +2265 km over) — owner-confirmed threshold, 2026-09-21.
+  const LEASE_PROJECTION_MIN_DAYS = 21;
 
   const SENSOR_KEY_SET = new Set(SENSOR_KEYS);
   const DOOR_WINDOW_KEY_SET = new Set(DOOR_WINDOW_KEYS);
@@ -1100,31 +1106,44 @@
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--secondary-text-color);">${escHtml(t(hass, "lease_waiting"))}</span>`;
       } else if (lease.overLimit) {
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--error-color);">${escHtml(t(hass, "lease_over_limit", { km: Math.round(lease.used - lease.limit) }))}</span>`;
-      } else if (lease.paceStatus === "over" || lease.paceStatus === "under") {
-        const over = lease.paceStatus === "over";
-        // Each basis compares a different pair of numbers, so it gets its
-        // own copy — see the mockup/discussion for #8's follow-up
-        // (2026-09-21): "today"/"projected" both read naturally as a
-        // cumulative km figure, "remaining_rate" is a RATE (km/day) since
-        // it compares two rates directly rather than extrapolating a total.
-        let key, km;
-        if (lease.paceBasis === "projected") {
-          key = over ? "lease_over_pace_projected" : "lease_under_pace_projected";
-          km = Math.round(over ? lease.projectedOverKm : -lease.projectedOverKm);
-        } else if (lease.paceBasis === "remaining_rate" && lease.rateOverKm !== null) {
-          key = over ? "lease_over_pace_rate" : "lease_under_pace_rate";
-          km = Math.round((over ? lease.rateOverKm : -lease.rateOverKm) * 10) / 10;
-        } else {
-          key = over ? "lease_over_pace" : "lease_under_pace";
-          km = Math.round(over ? lease.overPaceKm : -lease.overPaceKm);
-        }
-        const restNote = over && lease.paceBasis !== "remaining_rate" && lease.restDaysNeeded > 0
-          ? `<span class="vc-rest-inline">${escHtml(t(hass, "lease_rest_days_inline", { days: lease.restDaysNeeded }))}</span>`
-          : "";
-        const color = over ? "var(--warning-color)" : "var(--success-color)";
-        summaryHtml = `<span class="vc-expand-summary" style="color:${color};">${escHtml(t(hass, key, { km }))}${restNote}</span>`;
       } else {
-        summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_on_pace"))}</span>`;
+        // Surfaced whenever "projected" was configured but there isn't
+        // enough real data yet to trust it — the status below is using
+        // the "today" fallback instead, so this explains why it doesn't
+        // match what was asked for (real report: confusing on its own).
+        const collectingNote = lease.paceBasis === "projected" && !lease.projectionReady
+          ? `<span class="vc-rest-inline">${escHtml(t(hass, "lease_collecting_projection_note", { day: lease.daysElapsed, total: lease.daysInYear }))}</span>`
+          : "";
+        if (lease.paceStatus === "over" || lease.paceStatus === "under") {
+          const over = lease.paceStatus === "over";
+          // Each basis compares a different pair of numbers, so it gets its
+          // own copy — see the mockup/discussion for #8's follow-up
+          // (2026-09-21): "today"/"projected" both read naturally as a
+          // cumulative km figure, "remaining_rate" is a RATE (km/day) since
+          // it compares two rates directly rather than extrapolating a
+          // total. Keys off `effectivePaceBasis`, not the configured
+          // `paceBasis`, so the wording always matches what actually
+          // produced this status (see `collectingNote` above for the
+          // "projected but not ready yet" fallback case).
+          let key, km;
+          if (lease.effectivePaceBasis === "projected") {
+            key = over ? "lease_over_pace_projected" : "lease_under_pace_projected";
+            km = Math.round(over ? lease.projectedOverKm : -lease.projectedOverKm);
+          } else if (lease.effectivePaceBasis === "remaining_rate" && lease.rateOverKm !== null) {
+            key = over ? "lease_over_pace_rate" : "lease_under_pace_rate";
+            km = Math.round((over ? lease.rateOverKm : -lease.rateOverKm) * 10) / 10;
+          } else {
+            key = over ? "lease_over_pace" : "lease_under_pace";
+            km = Math.round(over ? lease.overPaceKm : -lease.overPaceKm);
+          }
+          const restNote = over && lease.projectionReady && lease.effectivePaceBasis !== "remaining_rate" && lease.restDaysNeeded > 0
+            ? `<span class="vc-rest-inline">${escHtml(t(hass, "lease_rest_days_inline", { days: lease.restDaysNeeded }))}</span>`
+            : "";
+          const color = over ? "var(--warning-color)" : "var(--success-color)";
+          summaryHtml = `<span class="vc-expand-summary" style="color:${color};">${escHtml(t(hass, key, { km }))}${restNote}${collectingNote}</span>`;
+        } else {
+          summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_on_pace"))}${collectingNote}</span>`;
+        }
       }
 
       let detailHtml = "";
@@ -1132,7 +1151,7 @@
         const baselineNote = lease.baselineSource === "manual"
           ? t(hass, "lease_baseline_manual", { km: Math.round(lease.baselineValue) })
           : t(hass, "lease_baseline_auto");
-        const restTileHtml = lease.paceStatus === "over" && lease.paceBasis !== "remaining_rate"
+        const restTileHtml = lease.paceStatus === "over" && lease.effectivePaceBasis !== "remaining_rate" && lease.projectionReady
           ? `
             <div>
               <div style="font-size:20px; font-weight:800; line-height:1; color:${lease.restDaysNeeded > 0 ? "var(--warning-color)" : "var(--success-color)"};">${escHtml(lease.restDaysNeeded)}</div>
@@ -1218,7 +1237,7 @@
         <span class="vc-chart-label vc-chart-label-strong" style="left:${todayX.toFixed(1)}%; top:${plotBottom}%; transform:translate(-50%,6px);">${escHtml(t(hass, "lease_today_label"))}</span>
         <span class="vc-chart-label vc-chart-label-right" style="top:${plotBottom}%;">${escHtml(t(hass, "lease_end_label"))}</span>
         <span class="vc-chart-label vc-chart-label-right" style="top:${budgetY.toFixed(1)}%; transform:translateY(-100%);">${escHtml(t(hass, "lease_target", { km: Math.round(lease.limit) }))}</span>
-        <span class="vc-chart-label vc-chart-label-right" style="top:${projY.toFixed(1)}%; transform:translateY(-100%); color:var(--warning-color);">${escHtml(t(hass, "lease_projection", { km: Math.round(lease.projectedTotal) }))}</span>
+        <span class="vc-chart-label vc-chart-label-right" style="top:${projY.toFixed(1)}%; transform:translateY(-100%); color:var(--warning-color);">${escHtml(t(hass, "lease_projection", { km: Math.round(lease.projectedTotal), delta: (lease.projectedOverKm >= 0 ? "+" : "") + Math.round(lease.projectedOverKm) + " km" }))}</span>
       `;
 
       return `<div class="vc-chart-wrap" style="height:130px;">${svg}${labels}</div>`;
@@ -1594,10 +1613,19 @@
       const rateOverKm = recentDailyRate !== null ? recentDailyRate - remainingDailyBudget : null;
 
       const paceBasis = LEASE_PACE_BASIS_VALUES.includes(vehicle.lease_pace_basis) ? vehicle.lease_pace_basis : "today";
+      // "projected" specifically needs enough real days behind it before
+      // its extrapolation is trustworthy enough to drive a status — fall
+      // back to "today" until then (surfaced to the summary line via
+      // `projectionReady` so the fallback isn't silently different from
+      // what was configured). "remaining_rate" isn't gated: it never
+      // extrapolates a distant total, so it doesn't inherit the same
+      // early-year amplification.
+      const projectionReady = daysElapsed >= LEASE_PROJECTION_MIN_DAYS;
+      const effectivePaceBasis = paceBasis === "projected" && !projectionReady ? "today" : paceBasis;
       let paceStatus;
-      if (paceBasis === "projected") {
+      if (effectivePaceBasis === "projected") {
         paceStatus = projectedOverKm > tolerance ? "over" : projectedOverKm < -tolerance ? "under" : "on";
-      } else if (paceBasis === "remaining_rate" && rateOverKm !== null) {
+      } else if (effectivePaceBasis === "remaining_rate" && rateOverKm !== null) {
         const rateTolerance = remainingDailyBudget * toleranceFraction;
         paceStatus = rateOverKm > rateTolerance ? "over" : rateOverKm < -rateTolerance ? "under" : "on";
       } else {
@@ -1621,6 +1649,10 @@
       // — hidden in the render layer for "remaining_rate", which already
       // answers this question via rateOverKm directly). Irrelevant once
       // already over the limit (resting can't undo km already driven).
+      // Shares the same `projectionReady` gate as "projected" above — it's
+      // the same year-to-date extrapolation, so it's just as unreliable
+      // with very few days behind it (real report: 47 "rest days" on day
+      // ~10, gated in the render layer rather than recomputed here).
       const avgDailyRate = daysElapsed > 0 ? used / daysElapsed : 0;
       const restDaysNeeded = !overLimit && avgDailyRate > 0
         ? Math.max(0, Math.min(daysLeft, Math.ceil(daysLeft - remaining / avgDailyRate)))
@@ -1631,7 +1663,7 @@
         baselineValue, baselineSource,
         limit, used, remaining, overLimit,
         daysInYear, daysElapsed, daysLeft,
-        expectedUsed, overPaceKm, paceStatus, paceBasis,
+        expectedUsed, overPaceKm, paceStatus, paceBasis, effectivePaceBasis, projectionReady,
         projectedOverKm, remainingDailyBudget, recentDailyRate, rateOverKm,
         anniversaryStart, anniversaryEnd,
         chartPoints, projectedTotal, restDaysNeeded,
