@@ -4,7 +4,7 @@ A custom Lovelace card for one or more Volvo vehicles connected through Home Ass
 
 Unlike many custom cards, this one requires no external dependencies — no charting library, no map library. Everything is rendered with native SVG and plain HTML, and it reads your vehicles' data by auto-discovering entities from the HA **device** you pick for each car, instead of asking you to hand-pick 15+ individual entity IDs.
 
-![Two vehicles, side by side: an XC60-class EV showing its charge ring and lease budget, and a combustion V60 showing its fuel range and trip data](screenshots/overview.png)
+![Two vehicles, side by side: a Volvo EX30 showing its charge ring and lease budget, and a Volvo V60 Cross Country showing its fuel range and trip data](screenshots/overview.png)
 
 ---
 
