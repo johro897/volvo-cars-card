@@ -74,7 +74,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name), `picture` (optional image URL shown above the name, e.g. `/local/xc60.jpg`), `lease_annual_limit_km` (optional, enables the Lease budget section, e.g. `20000`), `lease_start_date` (required if the limit is set, `YYYY-MM-DD` — the lease's anniversary date, recomputed every year), `lease_start_odometer_km` (optional but recommended — the odometer reading at the start of the *current* lease year; if omitted, the card tries to auto-detect it from Home Assistant's long-term statistics for the odometer sensor) |
+| `vehicles` | list | **required**, at least one | Each entry: `device_id` (required, the HA device for that Volvo), `name` (optional display name override), `icon` (optional, e.g. `mdi:car-electric`, shown next to the name), `picture` (optional image URL shown above the name, e.g. `/local/xc60.jpg`), `lease_annual_limit_km` (optional, enables the Lease budget section, e.g. `20000`), `lease_start_date` (required if the limit is set, `YYYY-MM-DD` — the lease's anniversary date, recomputed every year), `lease_start_odometer_km` (optional but recommended — the odometer reading at the start of the *current* lease year; if omitted, the card tries to auto-detect it from Home Assistant's long-term statistics for the odometer sensor), `lease_pace_tolerance_pct` (optional, default `3` — how many percent of the annual limit counts as "on pace" before the status flips to over/under), `lease_pace_basis` (optional, default `"today"` — `"today"` compares usage-so-far to a proportional target, `"projected"` compares the extrapolated year-end total to the limit instead, `"remaining_rate"` compares your actual recent daily average to the recalculated remaining daily budget) |
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
@@ -119,6 +119,13 @@ show_stats: true
 ---
 
 ## Changelog
+
+### 0.9.0 (2026-09-21)
+
+- The Lease budget's over/under-pace status is now configurable per vehicle instead of a fixed rule, after a real report that "On pace" and the annual usage chart's own projection could disagree early in a lease year:
+  - `lease_pace_tolerance_pct` — how wide the ± band is before pace counts as over/under (default `3`, matching the previous fixed behavior).
+  - `lease_pace_basis` — which comparison decides the status: `"today"` (default, unchanged — usage-so-far vs. a proportional target), `"projected"` (the extrapolated year-end total vs. the limit — catches an early-year trend the default basis can miss), or `"remaining_rate"` (your actual recent daily average vs. the recalculated remaining daily budget — reacts to current driving without a single rested week masking a bad year-long trend, or a projection-style formula dividing by a rate that can hit exactly 0).
+  - The "rest days needed" note/tile (0.8.2) is hidden under `"remaining_rate"`, since that basis already answers the same question directly via the rate comparison itself.
 
 ### 0.8.2 (2026-09-20)
 

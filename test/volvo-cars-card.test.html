@@ -301,6 +301,49 @@ assert("restDaysNeeded is 0 once already over the limit — resting can't undo k
 const noConfigLease = card._computeLease({ device_id: "dev_xc60" }, dXc60, hass, leaseNow);
 assert("a vehicle with no lease config returns null (feature not enabled for that vehicle)", noConfigLease === null);
 
+// --- Lease budget: configurable tolerance + selectable pace basis
+// (owner-requested follow-up to #8, discussed 2026-09-20/21) ---
+
+// A deviation of ~500km on a 20000km limit sits inside the default 3%
+// band (600km) but outside a narrowed 2% band (400km) — proves the
+// tolerance is actually read from config, not just the old hardcoded 3%.
+const expectedUsedAt20000 = (overLease.daysElapsed / overLease.daysInYear) * 20000;
+const nearToleranceBaseline = 18420 - Math.round(expectedUsedAt20000 + 500);
+const defaultToleranceVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: nearToleranceBaseline };
+const defaultToleranceLease = card._computeLease(defaultToleranceVehicle, dXc60, hass, leaseNow);
+assert("a ~500km deviation stays 'on pace' under the default 3% tolerance (600km on a 20000 limit)", defaultToleranceLease.paceStatus === "on");
+const narrowToleranceLease = card._computeLease({ ...defaultToleranceVehicle, lease_pace_tolerance_pct: 2 }, dXc60, hass, leaseNow);
+assert("the SAME ~500km deviation becomes 'over pace' once lease_pace_tolerance_pct narrows it to 2% (400km)", narrowToleranceLease.paceStatus === "over");
+
+// "projected" basis: recreates the real scenario the owner reported
+// (day ~9 of a lease year) — a tiny deviation that's still within
+// tolerance today, but extrapolates to a large year-end overage.
+const earlyYearVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-09-05", lease_start_odometer_km: 17960 };
+const earlyYearLease = card._computeLease(earlyYearVehicle, dXc60, hass, leaseNow);
+assert("only ~8 days into the lease year, a small ~22km deviation stays within tolerance under the default 'today' basis", earlyYearLease.paceBasis === "today" && earlyYearLease.paceStatus === "on");
+assert("but the same data point already projects a large year-end overage (confirms the reported real-world scenario)", earlyYearLease.projectedOverKm > 900);
+const earlyYearProjectedLease = card._computeLease({ ...earlyYearVehicle, lease_pace_basis: "projected" }, dXc60, hass, leaseNow);
+assert("switching lease_pace_basis to 'projected' flips the SAME scenario to 'over pace'", earlyYearProjectedLease.paceBasis === "projected" && earlyYearProjectedLease.paceStatus === "over");
+
+// "remaining_rate" basis: compares two RATES (recalculated remaining daily
+// budget vs. a recent actual daily rate) instead of extrapolating a
+// distant total — chosen specifically because a single rested week can't
+// mask a bad year-long trend or trigger a division-by-zero the way a
+// 7-day-average "today"/"projected" basis could (see CLAUDE.md).
+const remainingRateVehicle = { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000, lease_pace_basis: "remaining_rate" };
+card._odoHistory.set("dev_xc60", { distances: [50, 48, 52, 47, 55, 51, 49], fetchedAt: Date.now(), fetching: false });
+const drivingHardLease = card._computeLease(remainingRateVehicle, dXc60, hass, leaseNow);
+assert("remaining_rate: driving well above the recalculated remaining daily budget is classified as over", drivingHardLease.paceStatus === "over" && drivingHardLease.rateOverKm > 0);
+
+card._odoHistory.set("dev_xc60", { distances: [0, 0, 0, 0, 0, 0, 0], fetchedAt: Date.now(), fetching: false });
+const restedWeekLease = card._computeLease(remainingRateVehicle, dXc60, hass, leaseNow);
+assert("remaining_rate: a fully rested week reads as 'under' for THIS week, with no division-by-zero crash", restedWeekLease.paceStatus === "under" && restedWeekLease.recentDailyRate === 0);
+assert("...but the underlying cumulative numbers are untouched — a rested week can't erase a bad year-long trend", restedWeekLease.remaining === overLease.remaining && restedWeekLease.overPaceKm === overLease.overPaceKm);
+
+card._odoHistory.set("dev_xc60", { distances: [], fetchedAt: Date.now(), fetching: false });
+const noHistoryLease = card._computeLease(remainingRateVehicle, dXc60, hass, leaseNow);
+assert("remaining_rate gracefully falls back to the 'today' calculation when there's no odometer history yet", noHistoryLease.recentDailyRate === null && noHistoryLease.paceStatus === overLease.paceStatus);
+
 // --- Lease budget: rendered section (manual baseline, real "now" — end-to-end wiring) ---
 const cardLease = document.createElement("volvo-cars-card");
 stage.appendChild(cardLease);
@@ -545,6 +588,19 @@ assert("layout select exists", !!layoutSelect);
 layoutSelect.value = "horizontal";
 layoutSelect.dispatchEvent(new Event("change", { bubbles: true }));
 assert("changing layout fires config-changed with the new value", lastConfig.layout === "horizontal");
+
+// --- Lease pace tolerance/basis fields (owner-requested, 2026-09-21) ---
+const toleranceInput = editor.shadowRoot.querySelector('[data-field="lease_pace_tolerance_pct"]');
+assert("lease pace tolerance input exists in the vehicle block", !!toleranceInput);
+toleranceInput.value = "5";
+toleranceInput.dispatchEvent(new Event("change", { bubbles: true }));
+assert("changing the tolerance input fires config-changed with the new value", lastConfig.vehicles[0].lease_pace_tolerance_pct === "5");
+
+const paceBasisSelect = editor.shadowRoot.querySelector('[data-field="lease_pace_basis"]');
+assert("lease pace basis select exists and defaults to 'today'", !!paceBasisSelect && paceBasisSelect.value === "today");
+paceBasisSelect.value = "remaining_rate";
+paceBasisSelect.dispatchEvent(new Event("change", { bubbles: true }));
+assert("changing the pace basis select fires config-changed with the new value", lastConfig.vehicles[0].lease_pace_basis === "remaining_rate");
 
 const titleInput = editor.shadowRoot.querySelector('[data-field="title"]');
 assert("title input exists in the editor", !!titleInput);

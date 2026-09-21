@@ -60,6 +60,10 @@
       lease_over_limit: "{km} km over the limit",
       lease_over_pace: "{km} km over pace",
       lease_under_pace: "{km} km under pace",
+      lease_over_pace_projected: "Projected {km} km over by year end",
+      lease_under_pace_projected: "Projected {km} km under by year end",
+      lease_over_pace_rate: "Driving {km} km/day above your remaining budget",
+      lease_under_pace_rate: "Driving {km} km/day under your remaining budget",
       lease_on_pace: "On pace",
       lease_km_left: "km left this year",
       lease_days_left: "days left in lease year",
@@ -79,6 +83,11 @@
       editor_lease_limit: "Annual lease limit (km, optional)",
       editor_lease_start_date: "Lease start date (YYYY-MM-DD, optional)",
       editor_lease_start_odometer: "Odometer at lease start (km, optional — recommended)",
+      editor_lease_tolerance: "Pace tolerance (%, optional, default 3)",
+      editor_lease_pace_basis: "Pace basis",
+      lease_basis_today: "Today's tracking (default)",
+      lease_basis_projected: "Projected year-end total",
+      lease_basis_remaining_rate: "Remaining daily budget",
       brake_fluid_level_warning: "Brake fluid low",
       coolant_level_warning: "Coolant level low",
       oil_level_warning: "Oil level warning",
@@ -173,6 +182,10 @@
       lease_over_limit: "{km} km över gränsen",
       lease_over_pace: "{km} km över takt",
       lease_under_pace: "{km} km under takt",
+      lease_over_pace_projected: "Prognos {km} km över vid årsslutet",
+      lease_under_pace_projected: "Prognos {km} km under vid årsslutet",
+      lease_over_pace_rate: "Kör {km} km/dag mer än kvarvarande budget",
+      lease_under_pace_rate: "Kör {km} km/dag mindre än kvarvarande budget",
       lease_on_pace: "I takt",
       lease_km_left: "km kvar i år",
       lease_days_left: "dagar kvar av leasingår",
@@ -192,6 +205,11 @@
       editor_lease_limit: "Årlig leasinggräns (km, valfritt)",
       editor_lease_start_date: "Leasingårets startdatum (ÅÅÅÅ-MM-DD, valfritt)",
       editor_lease_start_odometer: "Mätarställning vid leasingstart (km, valfritt — rekommenderas)",
+      editor_lease_tolerance: "Takttolerans (%, valfritt, standard 3)",
+      editor_lease_pace_basis: "Beräkningsgrund för takt",
+      lease_basis_today: "Dagens läge (standard)",
+      lease_basis_projected: "Prognos för årsslutet",
+      lease_basis_remaining_rate: "Kvarvarande daglig budget",
       brake_fluid_level_warning: "Bromsvätska låg",
       coolant_level_warning: "Kylarvätska låg",
       oil_level_warning: "Oljenivåvarning",
@@ -312,7 +330,8 @@
   const FUEL_STAT_KEYS = ["average_fuel_consumption", "average_fuel_consumption_automatic"];
   const ODOMETER_DAYS = 7;
   const DAY_MS = 24 * 3600 * 1000;
-  const LEASE_PACE_TOLERANCE = 0.03; // ±3% of the annual limit counts as "on pace"
+  const LEASE_PACE_TOLERANCE_DEFAULT_PCT = 3; // owner-configurable per vehicle via lease_pace_tolerance_pct
+  const LEASE_PACE_BASIS_VALUES = ["today", "projected", "remaining_rate"];
 
   const SENSOR_KEY_SET = new Set(SENSOR_KEYS);
   const DOOR_WINDOW_KEY_SET = new Set(DOOR_WINDOW_KEYS);
@@ -407,6 +426,11 @@
           lease_start_odometer_km: v.lease_start_odometer_km !== undefined && v.lease_start_odometer_km !== null && v.lease_start_odometer_km !== ""
             ? parseFloat(v.lease_start_odometer_km)
             : null,
+          // Both optional, owner-configurable (2026-09-21): how wide the
+          // ± band is before pace counts as "over"/"under" (default 3%),
+          // and which basis judges pace — see _computeLease for the three.
+          lease_pace_tolerance_pct: v.lease_pace_tolerance_pct ? Math.max(0.1, parseFloat(v.lease_pace_tolerance_pct)) : null,
+          lease_pace_basis: LEASE_PACE_BASIS_VALUES.includes(v.lease_pace_basis) ? v.lease_pace_basis : "today",
         })),
       };
       if (this._hass) this._render();
@@ -1076,13 +1100,29 @@
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--secondary-text-color);">${escHtml(t(hass, "lease_waiting"))}</span>`;
       } else if (lease.overLimit) {
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--error-color);">${escHtml(t(hass, "lease_over_limit", { km: Math.round(lease.used - lease.limit) }))}</span>`;
-      } else if (lease.paceStatus === "over") {
-        const restNote = lease.restDaysNeeded > 0
+      } else if (lease.paceStatus === "over" || lease.paceStatus === "under") {
+        const over = lease.paceStatus === "over";
+        // Each basis compares a different pair of numbers, so it gets its
+        // own copy — see the mockup/discussion for #8's follow-up
+        // (2026-09-21): "today"/"projected" both read naturally as a
+        // cumulative km figure, "remaining_rate" is a RATE (km/day) since
+        // it compares two rates directly rather than extrapolating a total.
+        let key, km;
+        if (lease.paceBasis === "projected") {
+          key = over ? "lease_over_pace_projected" : "lease_under_pace_projected";
+          km = Math.round(over ? lease.projectedOverKm : -lease.projectedOverKm);
+        } else if (lease.paceBasis === "remaining_rate" && lease.rateOverKm !== null) {
+          key = over ? "lease_over_pace_rate" : "lease_under_pace_rate";
+          km = Math.round((over ? lease.rateOverKm : -lease.rateOverKm) * 10) / 10;
+        } else {
+          key = over ? "lease_over_pace" : "lease_under_pace";
+          km = Math.round(over ? lease.overPaceKm : -lease.overPaceKm);
+        }
+        const restNote = over && lease.paceBasis !== "remaining_rate" && lease.restDaysNeeded > 0
           ? `<span class="vc-rest-inline">${escHtml(t(hass, "lease_rest_days_inline", { days: lease.restDaysNeeded }))}</span>`
           : "";
-        summaryHtml = `<span class="vc-expand-summary" style="color:var(--warning-color);">${escHtml(t(hass, "lease_over_pace", { km: Math.round(lease.overPaceKm) }))}${restNote}</span>`;
-      } else if (lease.paceStatus === "under") {
-        summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_under_pace", { km: Math.round(-lease.overPaceKm) }))}</span>`;
+        const color = over ? "var(--warning-color)" : "var(--success-color)";
+        summaryHtml = `<span class="vc-expand-summary" style="color:${color};">${escHtml(t(hass, key, { km }))}${restNote}</span>`;
       } else {
         summaryHtml = `<span class="vc-expand-summary" style="color:var(--success-color);">${escHtml(t(hass, "lease_on_pace"))}</span>`;
       }
@@ -1092,7 +1132,7 @@
         const baselineNote = lease.baselineSource === "manual"
           ? t(hass, "lease_baseline_manual", { km: Math.round(lease.baselineValue) })
           : t(hass, "lease_baseline_auto");
-        const restTileHtml = lease.paceStatus === "over"
+        const restTileHtml = lease.paceStatus === "over" && lease.paceBasis !== "remaining_rate"
           ? `
             <div>
               <div style="font-size:20px; font-weight:800; line-height:1; color:${lease.restDaysNeeded > 0 ? "var(--warning-color)" : "var(--success-color)"};">${escHtml(lease.restDaysNeeded)}</div>
@@ -1515,11 +1555,56 @@
       const limit = vehicle.lease_annual_limit_km;
       const used = Math.max(0, currentOdometer - baselineValue);
       const remaining = limit - used;
+      const overLimit = used > limit;
+
+      // Tolerance is a ± band, in km, around whichever basis below is being
+      // compared — configurable per vehicle (owner-requested, 2026-09-21),
+      // defaulting to 3%.
+      const toleranceFraction = (vehicle.lease_pace_tolerance_pct > 0 ? vehicle.lease_pace_tolerance_pct : LEASE_PACE_TOLERANCE_DEFAULT_PCT) / 100;
+      const tolerance = limit * toleranceFraction;
+
+      // Basis 1 — "today": have I driven more than proportionally expected
+      // BY TODAY, ignoring where that leaves me at year-end.
       const expectedUsed = (daysElapsed / daysInYear) * limit;
       const overPaceKm = used - expectedUsed;
-      const tolerance = limit * LEASE_PACE_TOLERANCE;
-      const paceStatus = overPaceKm > tolerance ? "over" : overPaceKm < -tolerance ? "under" : "on";
-      const overLimit = used > limit;
+
+      // Basis 2 — "projected": extrapolate the year-to-date average across
+      // the whole year and compare that TOTAL to the limit. Sensitive early
+      // in the lease year — a small deviation on day 9 of 365 gets a ~40x
+      // multiplier — discussed at length with the owner 2026-09-20/21.
+      const projectedTotal = daysElapsed > 0 ? used * (daysInYear / daysElapsed) : used;
+      const projectedOverKm = projectedTotal - limit;
+
+      // Basis 3 — "remaining_rate": compare two RATES instead of
+      // extrapolating a distant total — how much you'd need to average per
+      // remaining day to land exactly on the limit, vs. how much you've
+      // actually been averaging lately (reuses the same daily-distance
+      // history already fetched for the "Last 7 days" chart, no separate
+      // fetch). Deliberately chosen over a 7-day-average "today"/"projected"
+      // basis: since `remainingDailyBudget` already bakes in the full
+      // cumulative history via `remaining`, a single rested week just
+      // correctly shows "under budget this week" — it can't mask a bad
+      // year-long trend the way projecting from a 7-day average could, and
+      // there's no division BY the recent rate to blow up at 0.
+      const remainingDailyBudget = remaining / Math.max(1, daysLeft);
+      const recentDistances = (this._odoHistory.get(vehicle.device_id)?.distances || []).filter((v) => v !== null);
+      const recentDailyRate = recentDistances.length
+        ? recentDistances.reduce((a, b) => a + b, 0) / recentDistances.length
+        : null;
+      const rateOverKm = recentDailyRate !== null ? recentDailyRate - remainingDailyBudget : null;
+
+      const paceBasis = LEASE_PACE_BASIS_VALUES.includes(vehicle.lease_pace_basis) ? vehicle.lease_pace_basis : "today";
+      let paceStatus;
+      if (paceBasis === "projected") {
+        paceStatus = projectedOverKm > tolerance ? "over" : projectedOverKm < -tolerance ? "under" : "on";
+      } else if (paceBasis === "remaining_rate" && rateOverKm !== null) {
+        const rateTolerance = remainingDailyBudget * toleranceFraction;
+        paceStatus = rateOverKm > rateTolerance ? "over" : rateOverKm < -rateTolerance ? "under" : "on";
+      } else {
+        // "today" basis, and the graceful fallback for "remaining_rate"
+        // when there isn't enough odometer history yet to compute a rate.
+        paceStatus = overPaceKm > tolerance ? "over" : overPaceKm < -tolerance ? "under" : "on";
+      }
 
       // Chart points: cumulative km used since the anniversary, at each
       // fetched statistics timestamp, plus today's live reading as the
@@ -1529,18 +1614,13 @@
         .filter((p) => p.t >= anniversaryStart.getTime());
       chartPoints.push({ t: now.getTime(), used });
 
-      const projectedTotal = daysElapsed > 0 ? used * (daysInYear / daysElapsed) : used;
-
       // How many of the remaining days need to be 0 km, assuming the other
       // days continue at the year-to-date average, to land at/under the
-      // limit. Uses the year-to-date average (same basis as overPaceKm/
-      // projectedTotal above) rather than a recent-days average on purpose:
-      // a short window can hit exactly 0 (a rested week) and make the
-      // number swing to "0 needed" overnight even though nothing about the
-      // annual math actually improved that much — the slower year-to-date
-      // average stays consistent with the pace status shown next to it
-      // instead of contradicting it. Irrelevant once already over the
-      // limit (resting can't undo km already driven), so left at 0 there.
+      // limit. Always uses the year-to-date average regardless of
+      // paceBasis (only meaningful alongside the "today"/"projected" bases
+      // — hidden in the render layer for "remaining_rate", which already
+      // answers this question via rateOverKm directly). Irrelevant once
+      // already over the limit (resting can't undo km already driven).
       const avgDailyRate = daysElapsed > 0 ? used / daysElapsed : 0;
       const restDaysNeeded = !overLimit && avgDailyRate > 0
         ? Math.max(0, Math.min(daysLeft, Math.ceil(daysLeft - remaining / avgDailyRate)))
@@ -1551,7 +1631,8 @@
         baselineValue, baselineSource,
         limit, used, remaining, overLimit,
         daysInYear, daysElapsed, daysLeft,
-        expectedUsed, overPaceKm, paceStatus,
+        expectedUsed, overPaceKm, paceStatus, paceBasis,
+        projectedOverKm, remainingDailyBudget, recentDailyRate, rateOverKm,
         anniversaryStart, anniversaryEnd,
         chartPoints, projectedTotal, restDaysNeeded,
       };
@@ -1761,6 +1842,8 @@
           lease_annual_limit_km: v.lease_annual_limit_km ?? "",
           lease_start_date: v.lease_start_date || "",
           lease_start_odometer_km: v.lease_start_odometer_km ?? "",
+          lease_pace_tolerance_pct: v.lease_pace_tolerance_pct ?? "",
+          lease_pace_basis: LEASE_PACE_BASIS_VALUES.includes(v.lease_pace_basis) ? v.lease_pace_basis : "today",
         })),
       };
       this._render();
@@ -1865,6 +1948,17 @@
           </div>
           <div class="ed-row">
             <input class="ed-input" type="number" min="0" placeholder="${escHtml(t(hass, "editor_lease_start_odometer"))}" data-idx="${idx}" data-field="lease_start_odometer_km" value="${escHtml(v.lease_start_odometer_km)}" />
+          </div>
+          <div class="ed-row">
+            <input class="ed-input" type="number" min="0.1" step="0.1" placeholder="${escHtml(t(hass, "editor_lease_tolerance"))}" data-idx="${idx}" data-field="lease_pace_tolerance_pct" value="${escHtml(v.lease_pace_tolerance_pct)}" />
+          </div>
+          <div class="ed-row">
+            <span class="ed-label">${escHtml(t(hass, "editor_lease_pace_basis"))}</span>
+            <select class="ed-input ed-select" data-idx="${idx}" data-field="lease_pace_basis">
+              <option value="today" ${v.lease_pace_basis === "today" ? "selected" : ""}>${escHtml(t(hass, "lease_basis_today"))}</option>
+              <option value="projected" ${v.lease_pace_basis === "projected" ? "selected" : ""}>${escHtml(t(hass, "lease_basis_projected"))}</option>
+              <option value="remaining_rate" ${v.lease_pace_basis === "remaining_rate" ? "selected" : ""}>${escHtml(t(hass, "lease_basis_remaining_rate"))}</option>
+            </select>
           </div>
         </div>`).join("");
 
