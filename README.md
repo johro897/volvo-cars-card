@@ -4,7 +4,7 @@ A custom Lovelace card for one or more Volvo vehicles connected through Home Ass
 
 Unlike many custom cards, this one requires no external dependencies — no charting library, no map library. Everything is rendered with native SVG and plain HTML, and it reads your vehicles' data by auto-discovering entities from the HA **device** you pick for each car, instead of asking you to hand-pick 15+ individual entity IDs.
 
-![](screenshots/overview.svg)
+![Two vehicles, side by side: an XC60-class EV showing its charge ring and lease budget, and a combustion V60 showing its fuel range and trip data](screenshots/overview.png)
 
 ---
 
@@ -97,6 +97,8 @@ show_stats: true
 ## How the Lease budget is calculated
 
 The Lease budget section (`lease_annual_limit_km` + `lease_start_date`) does several distinct calculations. This section spells out the exact formula behind every number it shows, so "80 km over pace" or "47 rest days needed" is never a mystery.
+
+![The Lease budget section expanded: pace status, km/days left, the annual usage chart with its projection, and the "Last 7 days" daily-budget bars](screenshots/lease-budget.png)
 
 ### Lease year and baseline
 
