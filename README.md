@@ -23,6 +23,7 @@ Unlike many custom cards, this one requires no external dependencies — no char
 - **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window); automatically falls back between the integration's different sensor variants depending on which one your vehicle actually exposes
 - **Distance driven** — a 7-day bar chart derived from odometer history (day-over-day distance, not a fake trip list)
 - **Lease mileage budget** (optional) — set an annual km limit and your lease's start date, and the card shows how much you have left, whether you're on pace, and an annual usage chart with a projection at your current driving rate. The odometer baseline can be typed in or auto-detected from Home Assistant's own long-term statistics.
+- **Reorderable sections** — choose which order Doors & windows, Charging, Service & health, Trip data, Position, Consumption stats, Distance driven, and Lease budget appear in, via the visual editor's up/down list
 - **Multiple vehicles** in one card, each configured independently
 - Visual (GUI) editor — no YAML required to get started
 - UI auto-translates to your Home Assistant language — English or Swedish (falls back to English)
@@ -79,6 +80,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
 | `title` | string | *(none — auto-translated, "Volvo Cars"/"Volvo Cars")* | Card header text. Set to an empty string to hide the header row entirely. |
+| `section_order` | list of strings | *(the order below)* | Controls the order of the sections below each vehicle's pinned hero (name/battery-fuel ring/quick actions, which is always first). Valid ids: `doors`, `charging`, `service`, `trip`, `position`, `stats`, `distance`, `lease` — default order is exactly that list. Applies to every vehicle in the card. A section a given vehicle doesn't have data for is skipped when rendering regardless of its position; an unknown id is ignored, and any id you leave out is appended after the ones you listed, so nothing is ever silently dropped. Easiest to set from the visual editor's "Section order" list (↑/↓ buttons) rather than by hand. |
 
 ```yaml
 type: custom:volvo-cars-card
@@ -181,6 +183,10 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 ---
 
 ## Changelog
+
+### 0.10.0 (2026-09-21)
+
+- Added a `section_order` option: choose the order the sections below each vehicle's hero appear in (Doors & windows, Charging, Service & health, Trip data, Position, Consumption stats, Distance driven, Lease budget), instead of the previous fixed sequence. Set from the visual editor's new "Section order" list (↑/↓ buttons per row) — no YAML required. Applies to every vehicle in the card; an id you leave out is appended after the ones you listed rather than dropped, and a section a vehicle has no data for is still skipped regardless of its position.
 
 ### 0.9.1 (2026-09-21)
 

@@ -540,6 +540,37 @@ cardVertical.hass = hass;
 const gridV = cardVertical.shadowRoot.querySelector(".vc-grid");
 assert("layout: vertical forces a single stacked column", gridV.style.gridTemplateColumns === "1fr");
 
+// --- section_order option test (owner-requested, 2026-09-21) ---
+const defaultOrderHtml = card.shadowRoot.querySelectorAll(".vc-vehicle")[0].innerHTML;
+assert("with no section_order configured, sections still render in the original default order (no regression)", defaultOrderHtml.indexOf("vc-doors-row") < defaultOrderHtml.indexOf("vc-charging"));
+
+const cardCustomOrder = document.createElement("volvo-cars-card");
+stage.appendChild(cardCustomOrder);
+cardCustomOrder.setConfig({
+  vehicles: [{
+    device_id: "dev_xc60",
+    lease_annual_limit_km: 20000,
+    lease_start_date: "2026-01-01",
+    lease_start_odometer_km: 2000,
+  }],
+  section_order: ["lease", "charging", "doors"],
+});
+cardCustomOrder.hass = hass;
+const orderedHtml = cardCustomOrder.shadowRoot.querySelectorAll(".vc-vehicle")[0].innerHTML;
+const leaseIdx = orderedHtml.indexOf('data-section="lease"');
+const chargingIdx = orderedHtml.indexOf("vc-charging");
+const doorsIdx = orderedHtml.indexOf("vc-doors-row");
+const serviceIdx = orderedHtml.indexOf('data-section="service"');
+assert("section_order puts the configured 'lease' section before 'charging'", leaseIdx > -1 && leaseIdx < chargingIdx);
+assert("section_order puts 'charging' (2nd) before 'doors' (3rd)", chargingIdx < doorsIdx);
+assert("sections left out of section_order are appended after the listed ones, not dropped", serviceIdx > -1 && serviceIdx > doorsIdx);
+
+const cardUnknownSectionId = document.createElement("volvo-cars-card");
+stage.appendChild(cardUnknownSectionId);
+cardUnknownSectionId.setConfig({ vehicles: [{ device_id: "dev_xc60" }], section_order: ["not-a-real-id", "doors"] });
+cardUnknownSectionId.hass = hass;
+assert("an unknown id in section_order is dropped rather than crashing or leaving a blank section", cardUnknownSectionId.shadowRoot.querySelectorAll(".vc-vehicle")[0].innerHTML.includes("vc-doors-row"));
+
 // --- Lock button test: every action now needs an extra confirm tap ---
 // Each click re-renders the whole card, so re-query the DOM after every
 // click instead of reusing a stale element reference.
@@ -624,6 +655,19 @@ assert("layout select exists", !!layoutSelect);
 layoutSelect.value = "horizontal";
 layoutSelect.dispatchEvent(new Event("change", { bubbles: true }));
 assert("changing layout fires config-changed with the new value", lastConfig.layout === "horizontal");
+
+// --- Section order editor control (owner-requested, 2026-09-21) ---
+const orderRows = editor.shadowRoot.querySelectorAll(".ed-order-row");
+assert("editor shows one order row per default section (8)", orderRows.length === 8);
+assert("the first row's 'up' button starts disabled (already at the top)", orderRows[0].querySelector('[data-action="move-section-up"]').disabled);
+assert("the last row's 'down' button starts disabled (already at the bottom)", orderRows[orderRows.length - 1].querySelector('[data-action="move-section-down"]').disabled);
+
+const firstRowName = orderRows[0].querySelector(".ed-order-name").textContent;
+const secondRowDownBtn = orderRows[1].querySelector('[data-action="move-section-down"]');
+secondRowDownBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+assert("clicking a row's 'down' button fires config-changed with the two ids swapped", lastConfig.section_order[1] === "service" && lastConfig.section_order[2] === "charging");
+const rowsAfterMove = editor.shadowRoot.querySelectorAll(".ed-order-row");
+assert("the editor re-renders to reflect the new order (row 1 unchanged, since only rows 2/3 swapped)", rowsAfterMove[0].querySelector(".ed-order-name").textContent === firstRowName);
 
 // --- Lease pace tolerance/basis fields (owner-requested, 2026-09-21) ---
 const toleranceInput = editor.shadowRoot.querySelector('[data-field="lease_pace_tolerance_pct"]');

@@ -127,6 +127,15 @@
       layout_auto: "Auto (wrap when narrow)",
       layout_horizontal: "Horizontal (side by side)",
       layout_vertical: "Vertical (stacked)",
+      editor_section_order: "Section order",
+      section_label_doors: "Doors & windows",
+      section_label_charging: "Charging",
+      section_label_service: "Service & health",
+      section_label_trip: "Trip data",
+      section_label_position: "Position",
+      section_label_stats: "Consumption stats",
+      section_label_distance: "Distance driven",
+      section_label_lease: "Lease budget",
       waiting: "Waiting for data…",
     },
     sv: {
@@ -250,6 +259,15 @@
       layout_auto: "Auto (radbryt vid smalt utrymme)",
       layout_horizontal: "Horisontell (sida vid sida)",
       layout_vertical: "Vertikal (staplat)",
+      editor_section_order: "Sektionsordning",
+      section_label_doors: "Dörrar & fönster",
+      section_label_charging: "Laddning",
+      section_label_service: "Service & hälsa",
+      section_label_trip: "Tripp-data",
+      section_label_position: "Position",
+      section_label_stats: "Förbrukningsstatistik",
+      section_label_distance: "Körd sträcka",
+      section_label_lease: "Leasingbudget",
       waiting: "Väntar på data…",
     },
   };
@@ -362,6 +380,20 @@
   const DEFAULT_STATS_HOURS = 168;
   const MAX_STATS_HOURS = 24 * 30;
   const LAYOUT_VALUES = ["auto", "horizontal", "vertical"];
+  // Every section below the pinned hero, in the order the card has always
+  // rendered them — also the default/fallback when `section_order` is
+  // absent or incomplete, so an unconfigured card never changes.
+  const DEFAULT_SECTION_ORDER = ["doors", "charging", "service", "trip", "position", "stats", "distance", "lease"];
+  const SECTION_ORDER_VALUES = new Set(DEFAULT_SECTION_ORDER);
+
+  // Keeps only known section ids (dropping typos/removed ids), preserving
+  // the caller's order, then appends any missing ones at the end — a
+  // config that only lists a few ids never silently loses the rest.
+  function normalizeSectionOrder(order) {
+    const known = Array.isArray(order) ? order.filter((id) => SECTION_ORDER_VALUES.has(id)) : [];
+    const missing = DEFAULT_SECTION_ORDER.filter((id) => !known.includes(id));
+    return [...new Set([...known, ...missing])];
+  }
 
   function localISO(date) {
     const p = (n) => String(n).padStart(2, "0");
@@ -375,7 +407,7 @@
     }
 
     static getStubConfig() {
-      return { vehicles: [], show_stats: true, layout: "auto" };
+      return { vehicles: [], show_stats: true, layout: "auto", section_order: DEFAULT_SECTION_ORDER };
     }
 
     constructor() {
@@ -417,6 +449,11 @@
           Math.max(1, parseInt(config.stats_history_hours, 10) || DEFAULT_STATS_HOURS)
         ),
         layout: LAYOUT_VALUES.includes(config.layout) ? config.layout : "auto",
+        // Order of the sections below the pinned hero (owner-requested,
+        // 2026-09-21) — card-level, applies to every vehicle in the card.
+        // Normalized so an unknown/removed id never silently drops a
+        // section, and an absent/empty config keeps today's fixed order.
+        section_order: normalizeSectionOrder(config.section_order),
         vehicles: config.vehicles.map((v) => ({
           device_id: v.device_id,
           name: v.name || "",
@@ -819,14 +856,22 @@
           ${engineAvailable && engineOn ? `<span class="vc-status-sep">·</span><span style="color:var(--info-color, var(--primary-color));">${escHtml(t(hass, "engine_on"))}</span>` : ""}
         </div>`;
 
-      const doorsHtml = this._renderDoors(d, hass, vehicle.device_id);
-      const chargingHtml = this._renderCharging(d, hass);
-      const serviceHtml = this._renderServiceHealth(d, hass, vehicle.device_id);
-      const tripHtml = this._renderTripData(d, hass, vehicle.device_id);
-      const positionHtml = this._renderPosition(d, hass);
-      const statsHtml = this._config.show_stats ? this._renderStats(vehicle, d, hass, isEv) : "";
-      const distanceTrendHtml = this._config.show_stats ? this._renderDistanceTrend(vehicle, d, hass) : "";
-      const leaseHtml = this._renderLeaseBudget(vehicle, d, hass);
+      // Rendered once each regardless of order (identical cost either way),
+      // then assembled below in whatever sequence section_order specifies —
+      // reordering never changes what gets computed, only where it lands.
+      const sectionsById = {
+        doors: this._renderDoors(d, hass, vehicle.device_id),
+        charging: this._renderCharging(d, hass),
+        service: this._renderServiceHealth(d, hass, vehicle.device_id),
+        trip: this._renderTripData(d, hass, vehicle.device_id),
+        position: this._renderPosition(d, hass),
+        stats: this._config.show_stats ? this._renderStats(vehicle, d, hass, isEv) : "",
+        distance: this._config.show_stats ? this._renderDistanceTrend(vehicle, d, hass) : "",
+        lease: this._renderLeaseBudget(vehicle, d, hass),
+      };
+      const sectionsHtml = (this._config.section_order || DEFAULT_SECTION_ORDER)
+        .map((id) => sectionsById[id] || "")
+        .join("");
       const iconHtml = vehicle.icon
         ? `<ha-icon icon="${escHtml(vehicle.icon)}" style="color:var(--primary-text-color); --mdc-icon-size:18px;"></ha-icon>`
         : "";
@@ -847,14 +892,7 @@
             ${heroValueHtml}
             ${buttonsHtml}
           </div>
-          ${doorsHtml}
-          ${chargingHtml}
-          ${serviceHtml}
-          ${tripHtml}
-          ${positionHtml}
-          ${statsHtml}
-          ${distanceTrendHtml}
-          ${leaseHtml}
+          ${sectionsHtml}
         </div>`;
     }
 
@@ -1850,7 +1888,7 @@
       super();
       this.attachShadow({ mode: "open" });
       this._hass = null;
-      this._config = { vehicles: [], show_stats: true, stats_history_hours: DEFAULT_STATS_HOURS };
+      this._config = { vehicles: [], show_stats: true, stats_history_hours: DEFAULT_STATS_HOURS, section_order: DEFAULT_SECTION_ORDER };
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
       this.shadowRoot.addEventListener("change", (e) => this._onFieldChange(e));
     }
@@ -1866,6 +1904,7 @@
         show_stats: config?.show_stats !== false,
         stats_history_hours: config?.stats_history_hours || DEFAULT_STATS_HOURS,
         layout: LAYOUT_VALUES.includes(config?.layout) ? config.layout : "auto",
+        section_order: normalizeSectionOrder(config?.section_order),
         vehicles: (config?.vehicles || []).map((v) => ({
           device_id: v.device_id || "",
           name: v.name || "",
@@ -1916,6 +1955,14 @@
       } else if (action === "remove-vehicle") {
         const idx = Number(el.dataset.idx);
         this._config.vehicles.splice(idx, 1);
+        this._render();
+        this._fireConfigChanged();
+      } else if (action === "move-section-up" || action === "move-section-down") {
+        const order = this._config.section_order;
+        const i = order.indexOf(el.dataset.sectionId);
+        const j = action === "move-section-up" ? i - 1 : i + 1;
+        if (i === -1 || j < 0 || j >= order.length) return;
+        [order[i], order[j]] = [order[j], order[i]];
         this._render();
         this._fireConfigChanged();
       }
@@ -1994,6 +2041,16 @@
           </div>
         </div>`).join("");
 
+      const sectionOrderRows = this._config.section_order.map((id, i) => `
+        <div class="ed-order-row">
+          <span class="ed-order-num">${i + 1}</span>
+          <span class="ed-order-name">${escHtml(t(hass, `section_label_${id}`))}</span>
+          <div class="ed-row" style="flex:0 0 auto; gap:4px;">
+            <button class="ed-order-btn" type="button" data-action="move-section-up" data-section-id="${id}" ${i === 0 ? "disabled" : ""} title="${escHtml(t(hass, "editor_section_order"))}">&#9650;</button>
+            <button class="ed-order-btn" type="button" data-action="move-section-down" data-section-id="${id}" ${i === this._config.section_order.length - 1 ? "disabled" : ""} title="${escHtml(t(hass, "editor_section_order"))}">&#9660;</button>
+          </div>
+        </div>`).join("");
+
       this.shadowRoot.innerHTML = `
         <style>
           .ed-wrap { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
@@ -2014,6 +2071,15 @@
           .ed-toggle-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
           .ed-hours { width: 90px; padding: 8px; border: 1px solid var(--divider-color); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); }
           .ed-layout { width: 160px; }
+          .ed-order-block { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--divider-color); border-radius: 8px; }
+          .ed-order-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--card-background-color); border: 1px solid var(--divider-color); }
+          .ed-order-num { font-size: 11px; color: var(--secondary-text-color); width: 14px; flex: 0 0 auto; }
+          .ed-order-name { flex: 1 1 auto; font-size: 13px; color: var(--primary-text-color); }
+          .ed-order-btn {
+            flex: 0 0 auto; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--divider-color);
+            background: var(--card-background-color); color: var(--secondary-text-color); cursor: pointer;
+          }
+          .ed-order-btn:disabled { opacity: 0.35; cursor: default; }
         </style>
         <div class="ed-wrap">
           <div class="ed-toggle-row" style="margin-top:0;">
@@ -2039,6 +2105,8 @@
               <option value="vertical" ${this._config.layout === "vertical" ? "selected" : ""}>${escHtml(t(hass, "layout_vertical"))}</option>
             </select>
           </div>
+          <span class="ed-label" style="margin-top:6px;">${escHtml(t(hass, "editor_section_order"))}</span>
+          <div class="ed-order-block">${sectionOrderRows}</div>
         </div>`;
     }
   }
