@@ -71,6 +71,8 @@ Or via the UI: **Settings → Dashboards → ⋮ → Resources → Add resource*
 
 Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to add each vehicle by picking its HA device — no YAML required.
 
+![The visual editor: vehicle fields, lease budget settings, layout, and the reorderable "Section order" list, with a live preview alongside](screenshots/editor-section-order.png)
+
 ### Options
 
 | Option | Type | Default | Description |
