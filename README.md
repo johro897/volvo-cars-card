@@ -92,6 +92,68 @@ show_stats: true
 
 ---
 
+## How the Lease budget is calculated
+
+The Lease budget section (`lease_annual_limit_km` + `lease_start_date`) does several distinct calculations. This section spells out the exact formula behind every number it shows, so "80 km over pace" or "47 rest days needed" is never a mystery.
+
+### Lease year and baseline
+
+- **Lease year**: `lease_start_date`'s month/day recurs every year — the *current* lease year always starts on the most recent occurrence of that month/day that isn't in the future. You don't need to update the date yourself each year.
+- **Baseline** (the odometer reading the current lease year started from): `lease_start_odometer_km` if you set it, otherwise auto-detected from Home Assistant's own long-term statistics (the odometer sensor's first recorded statistics point at or after the lease year's start).
+- **`used`** = current odometer reading − baseline (never negative)
+- **`remaining`** = `lease_annual_limit_km` − `used`
+- **days elapsed / days left** = calendar days since / until the lease year's start, out of the full lease year's length (365 or 366 days)
+
+### Pace status — `lease_pace_basis`
+
+Three different ways to decide whether you're **on pace**, **over pace**, or **under pace**:
+
+**`"today"` (default)**
+```
+expected by now = (days elapsed / days in lease year) × annual limit
+deviation        = used − expected by now
+```
+Compares only what you've actually driven so far against a straight-line target for today's date. Doesn't look ahead to where that leaves you at year end.
+
+**`"projected"`**
+```
+projected total = used × (days in lease year / days elapsed)
+deviation        = projected total − annual limit
+```
+Extrapolates your year-to-date average across the *whole* year and compares that total to the limit — more forward-looking, but sensitive very early in the lease year (a small deviation on day 9 of 365 gets amplified roughly 40×). For that reason, the card doesn't actually use this basis until at least **21 days** have elapsed — before then it quietly falls back to the `"today"` calculation above and shows *"Collecting more data before projecting (day N of 365)"* instead of a premature, unstable number.
+
+**`"remaining_rate"`**
+```
+remaining daily budget = remaining / days left
+recent daily rate       = average of the last 7 days' actual driving (same data behind the "Last 7 days" chart below)
+deviation               = recent daily rate − remaining daily budget
+```
+Compares two *rates* instead of extrapolating a distant total. This reacts to how you're driving right now without a single rested week masking a bad year-long trend — `remaining` already carries the full cumulative history, so a rested week just correctly reads as "under budget this week" — and there's no division *by* the recent rate, so it can never hit a divide-by-zero the way a naive short-window projection could.
+
+Whichever basis is active, `deviation` is checked against a tolerance band before it's called "over" or "under":
+```
+tolerance = annual limit × (lease_pace_tolerance_pct / 100)     — default 3%
+```
+`deviation > tolerance` → **over pace**, `deviation < −tolerance` → **under pace**, otherwise **on pace**. (For `"remaining_rate"`, the tolerance scales with the remaining daily budget instead of the full annual limit, since that basis compares a daily rate, not a cumulative total.)
+
+### Rest days needed
+
+Shown alongside an "over pace" status under `"today"`/`"projected"` (hidden under `"remaining_rate"`, which already answers the same question directly via its own rate comparison):
+```
+rest days needed = days left − (remaining / (used / days elapsed))
+```
+In plain terms: *if I keep driving at my year-to-date average on the days I do drive, how many of the remaining days need to be 0 km to land at or under the limit?* Clamped between 0 and the number of days actually left, and always 0 once you're already over the annual limit (resting can't undo kilometers already driven). Like `"projected"`, this isn't shown until at least 21 days have elapsed, for the same reason.
+
+### "Last 7 days" bars
+
+A separate, independent calculation from everything above — colors each of the last 7 days' actual driving against a flat daily budget:
+```
+daily budget = lease_annual_limit_km / 365
+```
+No extrapolation and no tolerance band involved — just that day's actual distance compared straight to this fixed number, one bar per day, green if under and orange if over.
+
+---
+
 ## Not included (yet)
 
 - **An embedded map** instead of an "open in map" link — no map library is used in this project; a real embedded map would be a separate, larger decision.
