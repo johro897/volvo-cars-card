@@ -184,100 +184,23 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 
 ## Changelog
 
-### 0.10.0 (2026-09-21)
+### 1.0.0 (2026-09-21) — First stable release
 
-- Added a `section_order` option: choose the order the sections below each vehicle's hero appear in (Doors & windows, Charging, Service & health, Trip data, Position, Consumption stats, Distance driven, Lease budget), instead of the previous fixed sequence. Set from the visual editor's new "Section order" list (↑/↓ buttons per row) — no YAML required. Applies to every vehicle in the card; an id you leave out is appended after the ones you listed rather than dropped, and a section a vehicle has no data for is still skipped regardless of its position.
+Verified live against the owner's own two Volvo vehicles (an EV and a combustion car) across every section below, after just over a week of iteration since the `0.5.0` preview. Individual dated entries from that period are summarized here rather than kept one-by-one — see the [commit history](https://github.com/johro897/volvo-cars-card/commits/main) for the full trail.
 
-### 0.9.1 (2026-09-21)
-
-Fixes two real points of confusion reported right after 0.9.0 shipped:
-
-- The annual usage chart's projection label now states the over/under delta directly ("~22630 km at this rate (+2630 km vs. target)") instead of a lone total the reader had to subtract from the target themselves to connect to the summary line's own "X km over pace" figure.
-- The `"projected"` pace basis (and the "rest days needed" figure, which shares the same year-to-date extrapolation) now waits until at least 21 days into the lease year before it drives the status — a deviation this early gets amplified by a large multiplier and produced a dramatic, unreliable number (47 "rest days needed" after only ~10 days, in the reported case). Before day 21, the summary falls back to the `"today"` comparison and shows *"Collecting more data before projecting (day N of 365)"* instead, so the fallback isn't silently different from what was configured.
-
-### 0.9.0 (2026-09-21)
-
-- The Lease budget's over/under-pace status is now configurable per vehicle instead of a fixed rule, after a real report that "On pace" and the annual usage chart's own projection could disagree early in a lease year:
-  - `lease_pace_tolerance_pct` — how wide the ± band is before pace counts as over/under (default `3`, matching the previous fixed behavior).
-  - `lease_pace_basis` — which comparison decides the status: `"today"` (default, unchanged — usage-so-far vs. a proportional target), `"projected"` (the extrapolated year-end total vs. the limit — catches an early-year trend the default basis can miss), or `"remaining_rate"` (your actual recent daily average vs. the recalculated remaining daily budget — reacts to current driving without a single rested week masking a bad year-long trend, or a projection-style formula dividing by a rate that can hit exactly 0).
-  - The "rest days needed" note/tile (0.8.2) is hidden under `"remaining_rate"`, since that basis already answers the same question directly via the rate comparison itself.
-
-### 0.8.2 (2026-09-20)
-
-- The Lease budget section now shows how many rest (0 km) days are needed to land back on budget, whenever you're over pace: inline in the collapsed summary ("64 km over pace · 2 rest days needed") and as its own stat tile once expanded. Uses the year-to-date average pace (the same basis the existing pace/projection numbers already use), not a short recent window — a 7-day average can hit exactly 0 after a single rested week and make the number swing to "nothing needed" overnight even though the year-long picture hasn't really changed. Closes #8.
-
-### 0.8.1 (2026-09-20)
-
-- Bar charts (Distance driven, Lease budget's "Last 7 days") now show a hover tooltip with the exact day and value, instead of only a height to eyeball against the axis scale (closes #7).
-
-### 0.8.0 (2026-09-13)
-
-- All four charts (consumption sparkline, Distance driven bars, Lease budget's annual usage chart, and its "Last 7 days" bars) now stretch to the card's full width instead of being squeezed into a narrow, centered strip — the two lease charts were missing `preserveAspectRatio="none"` entirely (closes #6), unlike the other two charts which already had it (but had no labels — see below).
-- Added real axis values to the consumption sparkline and Distance driven bars: a y-axis min/max (or scale) label and, respectively, start/end date labels or a weekday label per bar — previously these two charts were just a bare trend shape with no way to read an actual number off them (closes #1).
-- All chart text (axis values, weekday/date labels, budget/projection annotations) is now plain HTML positioned around/over the chart instead of inline SVG `<text>` — necessary once the charts stretch non-uniformly to fill the full width, since SVG text (and the old circle "today" marker, now a short line) would otherwise visibly distort under that stretch.
-
-### 0.7.1 (2026-09-13)
-
-- Fixed a real gap in the Lease budget section: the daily distance chart ("Last 7 days") shown in the reviewed design was missing from the actual `0.7.0` release — only the separate, pre-existing Distance driven section existed. Added a dedicated 7-day bar chart, colored per day against the lease's own daily budget (annual limit ÷ 365), so it's visible whenever a vehicle has lease tracking configured, even with `show_stats: false`.
-
-### 0.7.0 (2026-09-13)
-
-- Added an optional **Lease mileage budget** section (closes #2): set an annual km limit and lease start date, get a countdown, a pace status, and an annual usage chart with a projection at your current rate. The odometer baseline can be entered manually or auto-detected from Home Assistant's long-term statistics.
-
-### 0.6.2 (2026-09-12)
-
-- Added a `title` config option — the header was previously a hardcoded, non-configurable "Volvo Cars" string with no way to change or hide it
-
-### 0.6.1 (2026-09-12)
-
-- Added a Trip data section (trip meter + average speed, manual and automatic)
-- Added a `picture` config option to show a photo of the vehicle
-- Charging section now also shows connection status, charging type, and current limit
-- The battery ring now draws a marker at the configured charge target level
-
-### 0.6.0 (2026-09-12)
-
-- **Fixed a real bug**: the average energy/fuel consumption stat was missing for vehicles that only expose a non-default sensor variant (`_automatic` or `_charge`) rather than the base one — the card now tries all variants
-- Added a **Service & health** section: odometer, distance/time/engine-hours to service, and fluid/tire-pressure warnings, collapsed to a one-line summary by default
-- Added **engine start/stop** as a fourth quick action (combustion/PHEV vehicles only)
-- Added a **distance-driven** 7-day bar chart derived from odometer history
-- Extended the door/window diagram with sunroof, tank/charge flap, and rear window zones
-- Wired up the previously-unused `icon` config option into the vehicle header
-
-### 0.5.5 (2026-09-12)
-
-- Every action (lock, climate, horn/lights) now requires an extra confirm tap instead of firing immediately — the icon arms a confirm chip, and only tapping that chip actually calls the service
-- Horn/lights now offers three separate choices (Horn, Lights, Horn & lights) using the integration's separate button entities, instead of always firing both together
-
-### 0.5.4 (2026-09-12)
-
-- Added a `layout` option (`auto` / `horizontal` / `vertical`) so vehicles can be forced side by side even in a narrow dashboard column, instead of always wrapping to a single column
-
-### 0.5.3 (2026-09-12)
-
-- Fixed the visual editor re-rendering its entire DOM on every `hass` update — in a live Home Assistant instance this happens continuously, so opening the device dropdown and trying to pick an option closed it instantly. The editor now only re-renders when the device list or language actually changes.
-
-### 0.5.2 (2026-09-12)
-
-- Fixed the visual editor dropping `type` from the card config on every edit (e.g. clicking "+ Add vehicle"), which made Home Assistant's edit dialog report "No card type configured" even though the card itself was configured correctly
-- Added a regression test asserting `type` survives editor round-trips
-
-### 0.5.1 (2026-09-12)
-
-Found by the owner testing `0.5.0` against real vehicles for the first time:
-
-- The device picker in the visual editor never appeared at all — replaced with a self-built dropdown (`hass.devices`, filtered to Volvo devices) instead of relying on `ha-device-picker`, which doesn't reliably load in every Home Assistant frontend session
-- "+ Add vehicle" updated the editor's own view but never saved the change, so the card kept reporting a configuration error even after adding a vehicle row
-- Also fixes two bugs caught in self-review before the report above: an invalid CSS value that made the quick-action buttons' tinted backgrounds invisible, and a checkbox/number field in the editor that silently ignored changes
-- Added a checked-in, dependency-free test suite (`test/volvo-cars-card.test.html`) covering both regressions and the core rendering/action behavior
-
-### 0.5.0 (2026-09-12)
-
-Initial early release — feedback and tweaks expected before a `1.0.0`.
-
-- Auto-discovery of vehicle entities from a picked HA device (verified against the official `Volvo` integration's source)
-- Battery/fuel overview, doors & windows diagram, lock/climate/horn quick actions, charging status, location link, consumption sparkline
-- Multi-vehicle support, visual editor, EN/SV translations, theme-aware styling
+- **Auto-discovery** from a single picked HA device — no manual entity mapping
+- **Battery/fuel overview** with a range/charge ring (EV/PHEV) or plain range readout (combustion), a target-level marker on the ring, and an optional vehicle photo
+- **Doors & windows** diagram plus a plain-text summary
+- **Quick actions with confirm** — lock/unlock, climate on/off, horn/lights (Horn, Lights, or both separately), and engine start/stop on combustion/PHEV vehicles — every action needs an extra confirm tap before it actually calls a service
+- **Charging status** (EV/PHEV) — status, power, time left, target, connection, type, current limit
+- **Service & health** — odometer, distance/time/engine-hours to service, fluid and tire-pressure warnings, collapsed to a one-line summary by default
+- **Trip data** — trip meter and average speed, manual and automatic counters
+- **Location** — an "open in map" link
+- **Consumption trend** and **Distance driven** charts — both full-width, with real axis labels and per-point hover tooltips
+- **Lease mileage budget** (optional) — an annual km limit and countdown, a pace status computed from a choice of three bases (`today`/`projected`/`remaining_rate`, with a configurable tolerance), a "rest days needed" figure, an annual usage chart with a projection, and a "Last 7 days" daily-budget chart — baseline entered manually or auto-detected from Home Assistant's long-term statistics
+- **Reorderable sections** (`section_order`) and a configurable **layout** (`auto`/`horizontal`/`vertical`) for multi-vehicle cards
+- Visual (GUI) editor throughout — no YAML required for any of the above
+- EN/SV translations, theme-aware styling, a checked-in dependency-free test suite (150 checks)
 
 ---
 
