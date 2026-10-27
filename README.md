@@ -11,7 +11,7 @@ Unlike many custom cards, this one requires no external dependencies — no char
 ## Features
 
 - **Auto-discovery** — pick each vehicle's HA device once; the card finds its battery/fuel, range, lock, door/window, charging, location and consumption entities on its own
-- **Battery or fuel overview** — a range/charge ring for electric and plug-in hybrid vehicles, a plain range readout for combustion vehicles (no fake gauge when there's no real percentage to show)
+- **Battery or fuel overview** — a range/charge ring for electric and plug-in hybrid vehicles, a plain range readout for combustion vehicles (no fake gauge when there's no real percentage to show); the fuel amount shows your entity's own unit and precision, litres or gallons
 - **Doors & windows** — a top-down diagram highlighting only the open door/window/hood/tailgate, plus a plain-text summary
 - **Quick actions with confirm** — lock/unlock, climatization on/off, and horn/lights (offered separately as Horn, Lights, or Horn & lights) all call the vehicle's real Home Assistant services, but only after an extra confirm tap — the first tap just reveals the choice, nothing happens until you tap again
 - **Charging status** (electric/plug-in hybrid only) — status, power, time left, target level; the whole section is simply absent for a combustion-only vehicle, not just hidden
@@ -20,7 +20,7 @@ Unlike many custom cards, this one requires no external dependencies — no char
 - **Trip data** — trip meter and average speed for both the manual and automatic trip counters, collapsed to a one-line header by default
 - **Vehicle photo** — an optional picture shown above the name (`picture` config option)
 - **Location** — an "open in map" link from the vehicle's device tracker
-- **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window); automatically falls back between the integration's different sensor variants depending on which one your vehicle actually exposes
+- **Consumption trend** — a small sparkline built from Home Assistant's own History API (average energy or fuel consumption over a configurable window); automatically falls back between the integration's different sensor variants depending on which one your vehicle actually exposes. Fuel consumption is shown in **mpg** when your vehicle reports distances in miles, and in L/100 km otherwise (`fuel_consumption_unit`)
 - **Distance driven** — a 7-day bar chart derived from odometer history (day-over-day distance, not a fake trip list)
 - **Lease mileage budget** (optional) — set an annual km limit and your lease's start date, and the card shows how much you have left, whether you're on pace, and an annual usage chart with a projection at your current driving rate. The odometer baseline can be typed in or auto-detected from Home Assistant's own long-term statistics.
 - **Reorderable sections** — choose which order Doors & windows, Charging, Service & health, Trip data, Position, Consumption stats, Distance driven, and Lease budget appear in, via the visual editor's up/down list
@@ -80,6 +80,7 @@ Use the visual editor (**Edit dashboard → Add card → Volvo Cars Card**) to a
 | `show_stats` | boolean | `true` | Show the consumption sparkline section |
 | `show_actions` | boolean | `true` | Show the quick-action buttons (lock, climate, horn/lights, engine) in the hero. `false` hides them and their confirm rows; the lock/climate status text stays. |
 | `stats_history_hours` | integer | `168` (7 days) | How far back the consumption sparkline looks |
+| `fuel_consumption_unit` | string | `"auto"` | Unit for the fuel-consumption stat. `"auto"` shows **mpg** when the vehicle reports distances in miles and L/100 km when it reports kilometres; `"l_100km"` always keeps the integration's own L/100 km; `"mpg_uk"` and `"mpg_us"` always convert, using the imperial or the US gallon. See [Fuel consumption units](#fuel-consumption-units). Only affects combustion/PHEV fuel figures — an EV's kWh/100 km is never converted. |
 | `layout` | string | `"auto"` | `"auto"` wraps to a single column when the dashboard column is too narrow; `"horizontal"` forces one column per vehicle, side by side, regardless of width; `"vertical"` always stacks vehicles in one column |
 | `title` | string | *(none — auto-translated, "Volvo Cars"/"Volvo Cars")* | Card header text. Set to an empty string to hide the header row entirely. |
 | `section_order` | list of strings | *(the order below)* | Controls the order of the sections below each vehicle's pinned hero (name/battery-fuel ring/quick actions, which is always first). Valid ids: `doors`, `charging`, `service`, `trip`, `position`, `stats`, `distance`, `lease` — default order is exactly that list. Applies to every vehicle in the card. A section a given vehicle doesn't have data for is skipped when rendering regardless of its position; an unknown id is ignored, and any id you leave out is appended after the ones you listed, so nothing is ever silently dropped. Easiest to set from the visual editor's "Section order" list (↑/↓ buttons) rather than by hand. |
@@ -94,6 +95,37 @@ vehicles:
     name: V60
 show_stats: true
 ```
+
+---
+
+## Fuel consumption units
+
+Volvo's API reports average fuel consumption in **L/100 km** for every car, wherever it is, and Home Assistant has no unit conversion for that quantity — so a UK or US owner whose odometer, range and trip meters all read in miles still saw `6.2 L/100km` in the consumption stat. The card now converts it ([#18](https://github.com/johro897/volvo-cars-card/issues/18)).
+
+**When it converts.** Same rule as every other distance on the card ([#13](https://github.com/johro897/volvo-cars-card/issues/13)): your own entities decide. If the vehicle's odometer reports `mi`, the fuel stat is shown in mpg. Vehicles that expose no odometer entity (some combustion cars don't) fall through to the range-to-empty, distance-to-service and trip-meter sensors, and finally to Home Assistant's own unit system.
+
+**Which gallon.** `"auto"` picks it from **Settings → System → General → Country**: the US gallon for `US`, `LR` and `MM`, the imperial gallon everywhere else — because outside those three, a car still reporting miles is almost always a UK one. If your country isn't set, you get imperial. Set `fuel_consumption_unit` explicitly to override:
+
+```yaml
+type: custom:volvo-cars-card
+fuel_consumption_unit: mpg_us   # auto | l_100km | mpg_uk | mpg_us
+vehicles:
+  - device_id: "01def..."
+```
+
+**The arithmetic.** mpg is the reciprocal of L/100 km, not a scaling of it:
+
+```
+mpg = (100 km in miles × one gallon in litres) / consumption in L/100 km
+    = 282.4809 / L100km   (imperial gallon, 4.54609 L)
+    = 235.2146 / L100km   (US gallon, 3.785411784 L)
+```
+
+So `6.2 L/100km` is `45.6 mpg` imperial or `37.9 mpg` US. Because it's a reciprocal, the sparkline's shape **inverts** — a peak in the L/100 km chart is a trough in the mpg one — and the axis labels are converted with it. A reading of exactly `0 L/100km` has no mpg equivalent and is shown as `—` rather than infinity.
+
+**What is never converted.** An EV's kWh/100 km (no mpg equivalent), and any consumption entity that doesn't report L/100 km in the first place — so a setup already delivering mpg is left alone rather than converted twice.
+
+**The fuel amount is a separate thing.** The litres/gallons figure under the range in the hero isn't converted by the card at all — Home Assistant already does that for the `fuel_amount` sensor. The card simply shows the entity's own unit and precision (`14.5 gal`, `55 L`), the same way every distance has since [#13](https://github.com/johro897/volvo-cars-card/issues/13). It used to hardcode `L` and round to whole numbers, so a US owner with 14.53 gal in the tank read `15 L`.
 
 ---
 
@@ -181,6 +213,12 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 
 **No consumption stat/sparkline shows up even though I have a Volvo EV/combustion car.** The integration only creates a sensor at all if Volvo's API actually returns that specific field for your vehicle, and there are several variants of the consumption sensor. The card tries all of them, so if you still see nothing, check **Developer Tools → States** for any entity under your car's device whose name contains "average energy consumption" or "average fuel consumption" — if none exist at all, your vehicle simply doesn't expose this data via the integration.
 
+**The fuel consumption still shows L/100 km, but my car reads in miles.** `"auto"` decides from the vehicle's own distance entities. Check **Developer Tools → States** for that device's odometer (or range-to-empty) sensor and confirm its `unit_of_measurement` is `mi` — if the integration reports `km` there, Home Assistant is converting the display but the card sees kilometres. Set `fuel_consumption_unit: mpg_uk` (or `mpg_us`) to force it.
+
+**The fuel amount shows litres but I expect gallons.** The card doesn't convert this one — it shows whatever the `fuel_amount` sensor reports. Change it in Home Assistant itself: **Settings → Devices & services → Entities →** your fuel-amount sensor **→ ⚙ → Unit of measurement**.
+
+**The mpg figure looks about 20% off.** You're almost certainly getting the wrong gallon — the imperial gallon is 4.546 L against the US gallon's 3.785 L, a 20.1% difference. Set **Settings → System → General → Country**, or pin it with `fuel_consumption_unit: mpg_uk` / `mpg_us`.
+
 **The vehicle icon (`icon:` config option) doesn't show up.** It's rendered with Home Assistant's own `<ha-icon>` element, which — unlike the custom `<select>` this card builds for the device picker — is not something built ourselves, so it's a (much lower-risk, but not zero-risk) assumption that it's always available. If it doesn't render, leave `icon` unset; nothing else depends on it.
 
 **The Lease budget section shows "Collecting data…" and never resolves.** This means the card couldn't establish a baseline: no `lease_start_odometer_km` was set, and no long-term statistics were found for the odometer sensor going back to your lease's anniversary date. The most common cause is that Home Assistant simply hasn't been tracking the vehicle that far back yet. Fix: set `lease_start_odometer_km` manually — it's optional but recommended anyway, since the auto-detected value is only as precise as the nearest weekly statistics point.
@@ -188,6 +226,11 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 ---
 
 ## Changelog
+
+### Unreleased
+
+- **Fuel consumption is localised to mpg** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): Volvo's API always reports L/100 km, so a vehicle reading in miles everywhere else still showed `6.2 L/100km`. The consumption stat and its sparkline now show **mpg** when the vehicle reports distances in miles, choosing the imperial or US gallon from your Home Assistant country. New `fuel_consumption_unit` option (`auto`/`l_100km`/`mpg_uk`/`mpg_us`) and an editor select to override it. Metric vehicles and EVs (kWh/100 km) are unchanged. See [Fuel consumption units](#fuel-consumption-units).
+- **The fuel amount follows its entity's unit** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): the hero's litres/gallons readout hardcoded `L` and rounded to whole numbers, so a US owner with 14.53 gal in the tank saw `15 L`. It now uses the entity's own unit and display precision, like every distance since [#13](https://github.com/johro897/volvo-cars-card/issues/13) — `14.5 gal`. Litre entities are unaffected (`42 L` stays `42 L`).
 
 ### 1.1.0 (2026-10-24)
 

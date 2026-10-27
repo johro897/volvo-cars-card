@@ -772,6 +772,78 @@ assert("#13: days/hours rows keep the card's own translated unit (not routed thr
 // Default is unchanged: km entities still render as km.
 assert("#13: km entities still render as km (regression)", vehicles[1].innerHTML.includes("560 km"));
 
+// --- #18: fuel consumption is localised to mpg when distances are in miles.
+// The Volvo API always reports L/100 km and HA has no conversion for it, so a
+// UK owner saw "6.2 L/100km" next to an odometer reading in miles. The V60
+// mock deliberately has NO odometer entity — it exercises the fall-through to
+// the other distance sensors (its range-to-empty reads 348 mi). ---
+const statsOf = (c, i) => c.shadowRoot.querySelectorAll(".vc-vehicle")[i].querySelector(".vc-stats-val").textContent;
+
+function fuelCard(hassObj, cardConfig) {
+  const c = document.createElement("volvo-cars-card");
+  stage.appendChild(c);
+  c.setConfig({ vehicles: [{ device_id: "dev_xc60" }, { device_id: "dev_v60" }], ...(cardConfig || {}) });
+  c.hass = hassObj;
+  return c;
+}
+
+const ukGbHass = { ...ukHass, config: { country: "GB" } };
+assert("#18: miles + country GB gives imperial mpg (6.2 L/100km -> 45.6 mpg)", statsOf(fuelCard(ukGbHass), 1) === "45.6 mpg");
+assert("#18: no country set still gives imperial mpg (miles outside the US means the UK gallon)", statsOf(fuelCard(ukHass), 1) === "45.6 mpg");
+assert("#18: miles + country US gives the US gallon (6.2 L/100km -> 37.9 mpg)", statsOf(fuelCard({ ...ukHass, config: { country: "US" } }), 1) === "37.9 mpg");
+assert("#18: country is matched case-insensitively", statsOf(fuelCard({ ...ukHass, config: { country: "us" } }), 1) === "37.9 mpg");
+
+// The EV's kWh/100 km has no mpg equivalent and must be left alone.
+assert("#18: an EV's kWh/100km is never converted, even in miles", statsOf(fuelCard(ukGbHass), 0) === "17.4 kWh/100km");
+
+// Metric cars are untouched, and the per-card override works both ways.
+assert("#18: a km vehicle keeps L/100km (regression)", statsOf(fuelCard(hass), 1) === "6.2 L/100km");
+assert("#18: fuel_consumption_unit 'l_100km' keeps L/100km on a miles vehicle", statsOf(fuelCard(ukGbHass, { fuel_consumption_unit: "l_100km" }), 1) === "6.2 L/100km");
+assert("#18: fuel_consumption_unit 'mpg_us' forces US mpg on a km vehicle", statsOf(fuelCard(hass, { fuel_consumption_unit: "mpg_us" }), 1) === "37.9 mpg");
+assert("#18: fuel_consumption_unit 'mpg_uk' forces imperial mpg on a km vehicle", statsOf(fuelCard(hass, { fuel_consumption_unit: "mpg_uk" }), 1) === "45.6 mpg");
+assert("#18: an unknown fuel_consumption_unit value falls back to auto", statsOf(fuelCard(hass, { fuel_consumption_unit: "furlongs" }), 1) === "6.2 L/100km");
+
+// HA's formatter would hand back the entity's own L/100 km, so a converted
+// reading must bypass it — while an unconverted one still defers to it.
+const fmtUkHass = { ...ukGbHass, formatEntityState: (st) => `HA[${st.entity_id}]` };
+const fmtFuelCard = fuelCard(fmtUkHass);
+assert("#18: a converted reading bypasses hass.formatEntityState", statsOf(fmtFuelCard, 1) === "45.6 mpg");
+assert("#18: an unconverted reading still defers to hass.formatEntityState", statsOf(fmtFuelCard, 0) === "HA[sensor.xc60_avg_energy]");
+
+// Unavailable/unknown states keep the em dash rather than becoming Infinity.
+const unknownFuelHass = { ...ukGbHass, states: { ...ukStates, "sensor.v60_avg_fuel": state("sensor.v60_avg_fuel", "unavailable", { unit_of_measurement: "L/100km" }) } };
+assert("#18: an unavailable consumption entity still shows the em dash", statsOf(fuelCard(unknownFuelHass), 1) === "—");
+const zeroFuelHass = { ...ukGbHass, states: { ...ukStates, "sensor.v60_avg_fuel": state("sensor.v60_avg_fuel", "0", { unit_of_measurement: "L/100km" }) } };
+assert("#18: 0 L/100km has no mpg equivalent and shows the em dash, not Infinity", statsOf(fuelCard(zeroFuelHass), 1) === "—");
+
+// The sparkline's axis labels and its plotted series are converted too.
+const sparkCard = fuelCard(ukGbHass);
+sparkCard._history.set("dev_v60", { values: [6.2, 5.0, 0, 8.0], fetchedAt: Date.now(), fetching: false });
+sparkCard._render();
+const sparkSection = sparkCard.shadowRoot.querySelectorAll(".vc-vehicle")[1].querySelector(".vc-stats-head").closest(".vc-section");
+assert("#18: the sparkline's max label is the converted maximum (5.0 L/100km -> 56 mpg)", sparkSection.innerHTML.includes("56 mpg"));
+assert("#18: the sparkline carries no leftover L/100km label", !sparkSection.innerHTML.includes("L/100km"));
+assert("#18: the zero reading is dropped from the series rather than plotted as infinity", !/Infinity|NaN/.test(sparkSection.querySelector("polyline").getAttribute("points")));
+
+// The hero's fuel-amount readout had a hardcoded " L" and rounded to whole
+// numbers, so a US entity reporting 14.53 gal rendered as "15 L" — the second
+// half of #18, and the one spot #13 missed.
+const gallonStates = { ...ukStates, "sensor.v60_fuel": state("sensor.v60_fuel", "14.53", { unit_of_measurement: "gal" }) };
+const gallonHero = fuelCard({ ...ukGbHass, states: gallonStates }).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML;
+assert("#18: the fuel amount uses the entity's own unit (14.5 gal), not a hardcoded L", gallonHero.includes("14.5 gal"));
+assert("#18: the fuel amount is no longer rounded to a whole number and mislabelled '15 L'", !gallonHero.includes("15 L"));
+assert("#18: a litres entity is unchanged — no trailing '.0' for metric owners (regression)", fuelCard(hass).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML.includes("42 L"));
+const fuelFmtHero = fuelCard({ ...ukGbHass, states: gallonStates, formatEntityState: (st) => `HA[${st.entity_id}]` }).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML;
+assert("#18: the fuel amount defers to hass.formatEntityState when HA provides one", fuelFmtHero.includes("HA[sensor.v60_fuel]"));
+
+// Editor round-trip.
+const fuelSelect = editor.shadowRoot.querySelector('[data-field="fuel_consumption_unit"]');
+assert("#18: the editor exposes a fuel-unit select defaulting to auto", !!fuelSelect && fuelSelect.value === "auto");
+assert("#18: the fuel-unit select offers all four modes", Array.from(fuelSelect.options).map((o) => o.value).join(",") === "auto,l_100km,mpg_uk,mpg_us");
+fuelSelect.value = "mpg_uk";
+fuelSelect.dispatchEvent(new Event("change", { bubbles: true }));
+assert("#18: picking a fuel unit fires config-changed with it", lastConfig.fuel_consumption_unit === "mpg_uk");
+
 // --- hidden_sections card test (issue #10) ---
 const cardHidden = document.createElement("volvo-cars-card");
 stage.appendChild(cardHidden);
