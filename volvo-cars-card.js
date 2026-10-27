@@ -128,6 +128,11 @@
       layout_auto: "Auto (wrap when narrow)",
       layout_horizontal: "Horizontal (side by side)",
       layout_vertical: "Vertical (stacked)",
+      editor_fuel_unit: "Fuel consumption unit",
+      fuel_unit_auto: "Auto (mpg when distances are in miles)",
+      fuel_unit_l_100km: "L/100 km",
+      fuel_unit_mpg_uk: "mpg (imperial gallon)",
+      fuel_unit_mpg_us: "mpg (US gallon)",
       editor_section_order: "Section order",
       editor_section_show: "Show this section",
       editor_section_hide: "Hide this section",
@@ -263,6 +268,11 @@
       layout_auto: "Auto (radbryt vid smalt utrymme)",
       layout_horizontal: "Horisontell (sida vid sida)",
       layout_vertical: "Vertikal (staplat)",
+      editor_fuel_unit: "Enhet för bränsleförbrukning",
+      fuel_unit_auto: "Auto (mpg när avstånd anges i miles)",
+      fuel_unit_l_100km: "l/100 km",
+      fuel_unit_mpg_uk: "mpg (brittisk gallon)",
+      fuel_unit_mpg_us: "mpg (amerikansk gallon)",
       editor_section_order: "Sektionsordning",
       editor_section_show: "Visa sektionen",
       editor_section_hide: "Dölj sektionen",
@@ -315,6 +325,78 @@
     const f = Math.pow(10, decimals);
     const unit = st.attributes?.unit_of_measurement ?? fallbackUnit;
     return unit ? `${Math.round(num * f) / f} ${unit}` : `${Math.round(num * f) / f}`;
+  }
+
+  // Average fuel consumption comes out of the Volvo API in L/100 km wherever
+  // the car is, and Home Assistant has no unit conversion for it — so an
+  // owner whose odometer, range and trip meters all read in miles still saw
+  // "6.2 L/100km". When the car's distances are in miles the card inverts the
+  // figure into miles per gallon instead: mpg = FACTOR / (L/100 km), where
+  // FACTOR is (100 km expressed in miles) × (one gallon in litres). #18
+  const MPG_UK_FACTOR = 282.4809363318222; // 62.137119… mi × 4.54609 L (imperial gallon)
+  const MPG_US_FACTOR = 235.2145833333333; // 62.137119… mi × 3.785411784 L (US gallon)
+  const FUEL_UNIT_VALUES = ["auto", "l_100km", "mpg_uk", "mpg_us"];
+  // Countries whose "mpg" means the US gallon. Everywhere else that still
+  // reports miles — the UK above all — means the imperial gallon, so that is
+  // what "auto" falls back to when hass.config.country isn't set.
+  const US_GALLON_COUNTRIES = new Set(["US", "LR", "MM"]);
+
+  // Does this vehicle report distances in miles? Same rule as distUnit (the
+  // car's own entities decide, odometer first), but it falls through the
+  // other distance sensors and finally HA's unit system, because an ICE
+  // vehicle may expose no odometer entity at all — and the fuel stat is
+  // exactly the section such a car does have. #18
+  function reportsMiles(hass, d) {
+    const ids = [
+      d?.sensors?.odometer,
+      d?.sensors?.distance_to_empty_tank,
+      d?.sensors?.distance_to_empty_battery,
+      d?.sensors?.distance_to_service,
+      d?.sensors?.trip_meter_automatic,
+      d?.sensors?.trip_meter_manual,
+    ];
+    for (const id of ids) {
+      const u = id && hass?.states?.[id]?.attributes?.unit_of_measurement;
+      if (u) return String(u).trim().toLowerCase() === "mi";
+    }
+    return String(hass?.config?.unit_system?.length || "").trim().toLowerCase() === "mi";
+  }
+
+  // Resolves `fuel_consumption_unit` into the conversion actually applied to
+  // a consumption entity, or null to leave the value exactly as the entity
+  // reports it. The L/100 km test is what keeps this off an EV's kWh/100 km
+  // and off a car that already reports mpg itself — only a litres-per-100-km
+  // reading has an mpg equivalent to compute. #18
+  function fuelConversion(hass, d, mode, unit) {
+    if (!/^\s*l\s*\/\s*100\s*km\s*$/i.test(unit || "")) return null;
+    const target = mode === "auto" ? (reportsMiles(hass, d) ? autoGallon(hass) : null) : mode;
+    if (target === "mpg_uk") return { factor: MPG_UK_FACTOR, unit: "mpg" };
+    if (target === "mpg_us") return { factor: MPG_US_FACTOR, unit: "mpg" };
+    return null;
+  }
+
+  function autoGallon(hass) {
+    const country = String(hass?.config?.country || "").trim().toUpperCase();
+    return US_GALLON_COUNTRIES.has(country) ? "mpg_us" : "mpg_uk";
+  }
+
+  // mpg is the reciprocal of L/100 km, so 0 — a car that has reported no
+  // consumption at all — has no mpg equivalent. Those readings return null
+  // and are dropped rather than plotted as infinity.
+  function toMpg(value, conv) {
+    const num = parseFloat(value);
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return conv.factor / num;
+  }
+
+  function fmtMpg(value, conv) {
+    const mpg = toMpg(value, conv);
+    return mpg === null ? "—" : `${Math.round(mpg * 10) / 10} ${conv.unit}`;
+  }
+
+  function convertHistory(history, conv) {
+    if (!conv || !history?.values?.length) return history;
+    return { ...history, values: history.values.map((v) => toMpg(v, conv)).filter((v) => v !== null) };
   }
 
   function escHtml(str) {
@@ -486,6 +568,13 @@
           Math.max(1, parseInt(config.stats_history_hours, 10) || DEFAULT_STATS_HOURS)
         ),
         layout: LAYOUT_VALUES.includes(config.layout) ? config.layout : "auto",
+        // Fuel consumption is reported in L/100 km whatever the car's market;
+        // "auto" shows mpg instead when the car's distances are in miles,
+        // picking the gallon from hass.config.country. The explicit values
+        // force one unit regardless. #18
+        fuel_consumption_unit: FUEL_UNIT_VALUES.includes(config.fuel_consumption_unit)
+          ? config.fuel_consumption_unit
+          : "auto",
         // Order of the sections below the pinned hero (owner-requested,
         // 2026-09-21) — card-level, applies to every vehicle in the card.
         // Normalized so an unknown/removed id never silently drops a
@@ -815,7 +904,7 @@
         heroValueHtml = `
           <div class="vc-plain-wrap">
             <span class="vc-ring-big">${rangeText}</span>
-            <span class="vc-ring-small">${Math.round(parseFloat(fuel.state))} L</span>
+            <span class="vc-ring-small">${fmtEntity(hass, fuel, "L", 1)}</span>
           </div>`;
       } else {
         heroValueHtml = `<div class="vc-plain-wrap"><span class="vc-ring-small">${escHtml(t(hass, "waiting"))}</span></div>`;
@@ -1408,10 +1497,16 @@
       const entityId = key ? d.sensors[key] : null;
       if (!entityId) return "";
       const st = hass.states[entityId];
-      const unit = st?.attributes?.unit_of_measurement || "";
-      const valueText = st && st.state !== "unknown" && st.state !== "unavailable" ? fmtEntity(hass, st, "", 1) : "—";
+      const rawUnit = st?.attributes?.unit_of_measurement || "";
+      const conv = fuelConversion(hass, d, this._config.fuel_consumption_unit, rawUnit);
+      const unit = conv ? conv.unit : rawUnit;
+      // A converted reading can't go through HA's own formatter — that would
+      // print the entity's L/100 km straight back — so format it here. #18
+      const valueText = st && st.state !== "unknown" && st.state !== "unavailable"
+        ? (conv ? fmtMpg(st.state, conv) : fmtEntity(hass, st, "", 1))
+        : "—";
       const days = Math.round(this._config.stats_history_hours / 24);
-      const history = this._history.get(vehicle.device_id);
+      const history = convertHistory(this._history.get(vehicle.device_id), conv);
       const svg = this._renderSparkline(history, isEv, hass, this._config.stats_history_hours, unit);
 
       return `
@@ -1950,7 +2045,7 @@
       super();
       this.attachShadow({ mode: "open" });
       this._hass = null;
-      this._config = { vehicles: [], show_stats: true, show_actions: true, stats_history_hours: DEFAULT_STATS_HOURS, section_order: DEFAULT_SECTION_ORDER, hidden_sections: [] };
+      this._config = { vehicles: [], show_stats: true, show_actions: true, stats_history_hours: DEFAULT_STATS_HOURS, fuel_consumption_unit: "auto", section_order: DEFAULT_SECTION_ORDER, hidden_sections: [] };
       this.shadowRoot.addEventListener("click", (e) => this._onClick(e));
       this.shadowRoot.addEventListener("change", (e) => this._onFieldChange(e));
     }
@@ -1967,6 +2062,7 @@
         show_actions: config?.show_actions !== false,
         stats_history_hours: config?.stats_history_hours || DEFAULT_STATS_HOURS,
         layout: LAYOUT_VALUES.includes(config?.layout) ? config.layout : "auto",
+        fuel_consumption_unit: FUEL_UNIT_VALUES.includes(config?.fuel_consumption_unit) ? config.fuel_consumption_unit : "auto",
         section_order: normalizeSectionOrder(config?.section_order),
         hidden_sections: normalizeHiddenSections(config?.hidden_sections),
         vehicles: (config?.vehicles || []).map((v) => ({
@@ -2053,6 +2149,8 @@
         this._config.stats_history_hours = parseInt(el.value, 10) || DEFAULT_STATS_HOURS;
       } else if (field === "layout") {
         this._config.layout = LAYOUT_VALUES.includes(el.value) ? el.value : "auto";
+      } else if (field === "fuel_consumption_unit") {
+        this._config.fuel_consumption_unit = FUEL_UNIT_VALUES.includes(el.value) ? el.value : "auto";
       } else {
         const idx = Number(el.dataset.idx);
         if (Number.isNaN(idx) || !this._config.vehicles[idx]) return;
@@ -2148,6 +2246,7 @@
           .ed-toggle-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
           .ed-hours { width: 90px; padding: 8px; border: 1px solid var(--divider-color); border-radius: 6px; background: var(--card-background-color); color: var(--primary-text-color); }
           .ed-layout { width: 160px; }
+          .ed-fuel { width: 200px; }
           .ed-order-block { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--divider-color); border-radius: 8px; }
           .ed-order-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--card-background-color); border: 1px solid var(--divider-color); }
           .ed-order-num { font-size: 11px; color: var(--secondary-text-color); width: 14px; flex: 0 0 auto; }
@@ -2185,6 +2284,12 @@
               <option value="auto" ${this._config.layout === "auto" ? "selected" : ""}>${escHtml(t(hass, "layout_auto"))}</option>
               <option value="horizontal" ${this._config.layout === "horizontal" ? "selected" : ""}>${escHtml(t(hass, "layout_horizontal"))}</option>
               <option value="vertical" ${this._config.layout === "vertical" ? "selected" : ""}>${escHtml(t(hass, "layout_vertical"))}</option>
+            </select>
+          </div>
+          <div class="ed-toggle-row">
+            <span class="ed-label">${escHtml(t(hass, "editor_fuel_unit"))}</span>
+            <select class="ed-hours ed-fuel" data-field="fuel_consumption_unit">
+              ${FUEL_UNIT_VALUES.map((val) => `<option value="${val}" ${this._config.fuel_consumption_unit === val ? "selected" : ""}>${escHtml(t(hass, `fuel_unit_${val}`))}</option>`).join("")}
             </select>
           </div>
           <span class="ed-label" style="margin-top:6px;">${escHtml(t(hass, "editor_section_order"))}</span>
