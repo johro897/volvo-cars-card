@@ -189,6 +189,10 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 
 ## Changelog
 
+### Unreleased
+
+- **Unit text is escaped everywhere** ([#20](https://github.com/johro897/volvo-cars-card/issues/20)): the hero range readout and the chart bar tooltips now escape the entity unit before it goes into the page, like every other string. No visible change for normal units.
+
 ### 1.1.0 (2026-10-24)
 
 - **Choose which sections are shown** ([#10](https://github.com/johro897/volvo-cars-card/issues/10)): new `hidden_sections` option and a visibility checkbox on each row of the editor's Section order list. Existing configs are unchanged.

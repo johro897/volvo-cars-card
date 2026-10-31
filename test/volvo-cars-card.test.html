@@ -797,6 +797,32 @@ actionsToggle.checked = false;
 actionsToggle.dispatchEvent(new Event("change", { bubbles: true }));
 assert("unchecking it fires config-changed with show_actions: false", lastConfig.show_actions === false);
 
+// --- #20: entity units are escaped wherever the card writes them into HTML.
+// A unit containing markup must show up as text, never become an element.
+const evilStates = {
+  ...states,
+  "sensor.xc60_range_battery": state("sensor.xc60_range_battery", "410", { unit_of_measurement: '<b id="probe_range_ev">x</b>' }),
+  "sensor.v60_range_tank": state("sensor.v60_range_tank", "560", { unit_of_measurement: '<b id="probe_range_ice">x</b>' }),
+  "sensor.xc60_odometer": state("sensor.xc60_odometer", "18420", { unit_of_measurement: '</title><circle id="probe_title"></circle><title>' }),
+};
+const cardEvil = document.createElement("volvo-cars-card");
+stage.appendChild(cardEvil);
+cardEvil.setConfig({
+  vehicles: [
+    { device_id: "dev_xc60", lease_annual_limit_km: 20000, lease_start_date: "2026-01-01", lease_start_odometer_km: 2000 },
+    { device_id: "dev_v60" },
+  ],
+});
+cardEvil.hass = { ...hass, states: evilStates };
+cardEvil._expanded.set("dev_xc60:lease", true);
+cardEvil._odoHistory.set("dev_xc60", { distances: [30, 60, 40, 80, 20, 70, 50], fetchedAt: Date.now(), fetching: false });
+cardEvil._render();
+const evilRoot = cardEvil.shadowRoot;
+assert("#20: a unit with markup does not become an element in the EV ring range", !evilRoot.querySelector("#probe_range_ev"));
+assert("#20: a unit with markup does not become an element in the fuel range", !evilRoot.querySelector("#probe_range_ice"));
+assert("#20: the escaped unit is still shown as text", evilRoot.textContent.includes('<b id="probe_range_ice">x</b>'));
+assert("#20: a unit cannot break out of the chart bar titles (Distance driven and Lease)", !evilRoot.querySelector("#probe_title"));
+
 // --- Render summary ------------------------------------------------
 const list = document.getElementById("results");
 results.forEach((r) => {

@@ -805,7 +805,7 @@
             </svg>
             <div class="vc-ring-text">
               <span class="vc-ring-big">${batteryKnown ? Math.round(pct) + "%" : "—"}</span>
-              <span class="vc-ring-small">${rangeText}</span>
+              <span class="vc-ring-small">${escHtml(rangeText)}</span>
             </div>
           </div>`;
       } else if (fuel && fuel.state !== "unknown" && fuel.state !== "unavailable") {
@@ -814,7 +814,7 @@
           : "—";
         heroValueHtml = `
           <div class="vc-plain-wrap">
-            <span class="vc-ring-big">${rangeText}</span>
+            <span class="vc-ring-big">${escHtml(rangeText)}</span>
             <span class="vc-ring-small">${Math.round(parseFloat(fuel.state))} L</span>
           </div>`;
       } else {
@@ -1165,7 +1165,7 @@
         if (v === null) return "";
         const x = plotLeft + i * gap + (gap - barW) / 2;
         const y = yAt(v);
-        const title = `<title>${escHtml(dayLabel(i))}: ${Math.round(v)} ${unit}</title>`;
+        const title = `<title>${escHtml(dayLabel(i))}: ${Math.round(v)} ${escHtml(unit)}</title>`;
         return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="var(--info-color, var(--primary-color))">${title}</rect>`;
       }).join("");
 
@@ -1366,7 +1366,7 @@
         const y = yAt(v);
         const overBudget = v > dailyBudget;
         const color = overBudget ? "var(--warning-color)" : "var(--success-color)";
-        const title = `<title>${escHtml(dayLabel(i))}: ${Math.round(v)} ${unit} (${overBudget ? "over" : "under"} daily budget)</title>`;
+        const title = `<title>${escHtml(dayLabel(i))}: ${Math.round(v)} ${escHtml(unit)} (${overBudget ? "over" : "under"} daily budget)</title>`;
         return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${(plotBottom - y).toFixed(1)}" rx="1.5" fill="${color}">${title}</rect>`;
       }).join("");
 
