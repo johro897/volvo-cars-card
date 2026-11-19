@@ -832,7 +832,7 @@ const gallonStates = { ...ukStates, "sensor.v60_fuel": state("sensor.v60_fuel", 
 const gallonHero = fuelCard({ ...ukGbHass, states: gallonStates }).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML;
 assert("#18: the fuel amount uses the entity's own unit (14.5 gal), not a hardcoded L", gallonHero.includes("14.5 gal"));
 assert("#18: the fuel amount is no longer rounded to a whole number and mislabelled '15 L'", !gallonHero.includes("15 L"));
-assert("#18: a litres entity is unchanged — no trailing '.0' for metric owners (regression)", fuelCard(hass).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML.includes("42 L"));
+assert("#18: a litres entity keeps its own unit (regression; the number follows HA's display precision, e.g. 42.0 L in a real HA)",fuelCard(hass).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML.includes("42 L"));
 const fuelFmtHero = fuelCard({ ...ukGbHass, states: gallonStates, formatEntityState: (st) => `HA[${st.entity_id}]` }).shadowRoot.querySelectorAll(".vc-vehicle")[1].innerHTML;
 assert("#18: the fuel amount defers to hass.formatEntityState when HA provides one", fuelFmtHero.includes("HA[sensor.v60_fuel]"));
 
@@ -875,6 +875,7 @@ const evilStates = {
   ...states,
   "sensor.xc60_range_battery": state("sensor.xc60_range_battery", "410", { unit_of_measurement: '<b id="probe_range_ev">x</b>' }),
   "sensor.v60_range_tank": state("sensor.v60_range_tank", "560", { unit_of_measurement: '<b id="probe_range_ice">x</b>' }),
+  "sensor.v60_fuel": state("sensor.v60_fuel", "42", { unit_of_measurement: '<b id="probe_fuel">x</b>' }),
   "sensor.xc60_odometer": state("sensor.xc60_odometer", "18420", { unit_of_measurement: '</title><circle id="probe_title"></circle><title>' }),
 };
 const cardEvil = document.createElement("volvo-cars-card");
@@ -893,6 +894,8 @@ const evilRoot = cardEvil.shadowRoot;
 assert("#20: a unit with markup does not become an element in the EV ring range", !evilRoot.querySelector("#probe_range_ev"));
 assert("#20: a unit with markup does not become an element in the fuel range", !evilRoot.querySelector("#probe_range_ice"));
 assert("#20: the escaped unit is still shown as text", evilRoot.textContent.includes('<b id="probe_range_ice">x</b>'));
+assert("#18: a unit with markup does not become an element in the fuel amount", !evilRoot.querySelector("#probe_fuel"));
+assert("#18: the escaped fuel-amount unit is still shown as text", evilRoot.textContent.includes('<b id="probe_fuel">x</b>'));
 assert("#20: a unit cannot break out of the chart bar titles (Distance driven and Lease)", !evilRoot.querySelector("#probe_title"));
 
 // --- Render summary ------------------------------------------------

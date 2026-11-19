@@ -104,7 +104,7 @@ Volvo's API reports average fuel consumption in **L/100 km** for every car, wher
 
 **When it converts.** Same rule as every other distance on the card ([#13](https://github.com/johro897/volvo-cars-card/issues/13)): your own entities decide. If the vehicle's odometer reports `mi`, the fuel stat is shown in mpg. Vehicles that expose no odometer entity (some combustion cars don't) fall through to the range-to-empty, distance-to-service and trip-meter sensors, and finally to Home Assistant's own unit system.
 
-**Which gallon.** `"auto"` picks it from **Settings → System → General → Country**: the US gallon for `US`, `LR` and `MM`, the imperial gallon everywhere else — because outside those three, a car still reporting miles is almost always a UK one. If your country isn't set, you get imperial. Set `fuel_consumption_unit` explicitly to override:
+**Which gallon.** `"auto"` picks it from **Settings → System → General → Country**: the US gallon for `US`, `LR` and `MM`, the imperial gallon everywhere else — because outside those three, a car still reporting miles is almost always a UK one. If your country isn't set, you get imperial. Note that this only concerns the consumption stat: the **fuel amount** in the hero follows Home Assistant's own unit conversion, which shows gallons as US gallons under the imperial unit system. A UK car can therefore show the tank in US gallons next to an imperial-gallon mpg figure; if you prefer litres there, switch the `fuel_amount` entity's unit in its entity settings. Set `fuel_consumption_unit` explicitly to override the mpg gallon:
 
 ```yaml
 type: custom:volvo-cars-card
@@ -125,7 +125,7 @@ So `6.2 L/100km` is `45.6 mpg` imperial or `37.9 mpg` US. Because it's a recipro
 
 **What is never converted.** An EV's kWh/100 km (no mpg equivalent), and any consumption entity that doesn't report L/100 km in the first place — so a setup already delivering mpg is left alone rather than converted twice.
 
-**The fuel amount is a separate thing.** The litres/gallons figure under the range in the hero isn't converted by the card at all — Home Assistant already does that for the `fuel_amount` sensor. The card simply shows the entity's own unit and precision (`14.5 gal`, `55 L`), the same way every distance has since [#13](https://github.com/johro897/volvo-cars-card/issues/13). It used to hardcode `L` and round to whole numbers, so a US owner with 14.53 gal in the tank read `15 L`.
+**The fuel amount is a separate thing.** The litres/gallons figure under the range in the hero isn't converted by the card at all — Home Assistant already does that for the `fuel_amount` sensor. The card simply shows the entity's own unit and display precision (`14.5 gal`, `55.0 L`), the same way every distance has since [#13](https://github.com/johro897/volvo-cars-card/issues/13). It used to hardcode `L` and round to whole numbers, so a US owner with 14.53 gal in the tank read `15 L`.
 
 ---
 
@@ -230,7 +230,7 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 ### Unreleased
 
 - **Fuel consumption is localised to mpg** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): Volvo's API always reports L/100 km, so a vehicle reading in miles everywhere else still showed `6.2 L/100km`. The consumption stat and its sparkline now show **mpg** when the vehicle reports distances in miles, choosing the imperial or US gallon from your Home Assistant country. New `fuel_consumption_unit` option (`auto`/`l_100km`/`mpg_uk`/`mpg_us`) and an editor select to override it. Metric vehicles and EVs (kWh/100 km) are unchanged. See [Fuel consumption units](#fuel-consumption-units).
-- **The fuel amount follows its entity's unit** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): the hero's litres/gallons readout hardcoded `L` and rounded to whole numbers, so a US owner with 14.53 gal in the tank saw `15 L`. It now uses the entity's own unit and display precision, like every distance since [#13](https://github.com/johro897/volvo-cars-card/issues/13) — `14.5 gal`. Litre entities are unaffected (`42 L` stays `42 L`).
+- **The fuel amount follows its entity's unit** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): the hero's litres/gallons readout hardcoded `L` and rounded to whole numbers, so a US owner with 14.53 gal in the tank saw `15 L`. It now uses the entity's own unit and display precision, like every distance since [#13](https://github.com/johro897/volvo-cars-card/issues/13) — `14.5 gal`. Litre entities keep their unit, and the number follows Home Assistant's display precision (for example `42.0 L`).
 - **Unit text is escaped everywhere** ([#20](https://github.com/johro897/volvo-cars-card/issues/20)): the hero range readout and the chart bar tooltips now escape the entity unit before it goes into the page, like every other string. No visible change for normal units.
 
 ### 1.1.0 (2026-10-24)
