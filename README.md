@@ -227,7 +227,7 @@ No extrapolation and no tolerance band involved — just that day's actual dista
 
 ## Changelog
 
-### Unreleased
+### 1.2.0 (2026-11-22)
 
 - **Fuel consumption is localised to mpg** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): Volvo's API always reports L/100 km, so a vehicle reading in miles everywhere else still showed `6.2 L/100km`. The consumption stat and its sparkline now show **mpg** when the vehicle reports distances in miles, choosing the imperial or US gallon from your Home Assistant country. New `fuel_consumption_unit` option (`auto`/`l_100km`/`mpg_uk`/`mpg_us`) and an editor select to override it. Metric vehicles and EVs (kWh/100 km) are unchanged. See [Fuel consumption units](#fuel-consumption-units).
 - **The fuel amount follows its entity's unit** ([#18](https://github.com/johro897/volvo-cars-card/issues/18)): the hero's litres/gallons readout hardcoded `L` and rounded to whole numbers, so a US owner with 14.53 gal in the tank saw `15 L`. It now uses the entity's own unit and display precision, like every distance since [#13](https://github.com/johro897/volvo-cars-card/issues/13) — `14.5 gal`. Litre entities keep their unit, and the number follows Home Assistant's display precision (for example `42.0 L`).
